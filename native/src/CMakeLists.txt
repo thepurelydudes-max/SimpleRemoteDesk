@@ -9,6 +9,7 @@ add_library(srd_core STATIC
     input/control_message.cpp
     input/injector.cpp
     control/control_client.cpp
+    host/host_service.cpp
     capture/gdi_screen_capture.cpp
     codec/jpeg_wic.cpp
     codec/jpeg_wic_decoder.cpp

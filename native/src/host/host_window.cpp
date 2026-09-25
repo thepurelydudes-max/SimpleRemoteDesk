@@ -32,6 +32,25 @@ RECT make_rect(int l, int t, int r, int b)
     return RECT{l, t, r, b};
 }
 
+std::string narrow_utf8(const std::wstring& text)
+{
+    if (text.empty()) return {};
+
+    const int bytes = ::WideCharToMultiByte(
+        CP_UTF8, 0,
+        text.data(), static_cast<int>(text.size()),
+        nullptr, 0, nullptr, nullptr);
+
+    std::string out(static_cast<std::size_t>(bytes), '\0');
+
+    ::WideCharToMultiByte(
+        CP_UTF8, 0,
+        text.data(), static_cast<int>(text.size()),
+        out.data(), bytes, nullptr, nullptr);
+
+    return out;
+}
+
 void set_control_font(HWND control, HFONT font)
 {
     ::SendMessageW(control, WM_SETFONT, reinterpret_cast<WPARAM>(font), TRUE);
@@ -653,7 +672,7 @@ void HostWindow::read_settings_from_controls()
         std::clamp(get_uint(qualityEdit_, 90), 40u, 100u);
 
     const std::wstring password = get_text(passwordEdit_);
-    settings_.password.assign(password.begin(), password.end());
+    settings_.password = narrow_utf8(password);
 
     if (settings_.password.size() < 6) {
         throw std::runtime_error("Пароль должен содержать минимум 6 символов.");

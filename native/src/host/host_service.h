@@ -2,6 +2,7 @@
 
 #include "core/socket_runtime.h"
 #include "video/latest_frame_mailbox.h"
+#include "network/discovery.h"
 
 #include <atomic>
 #include <cstdint>
@@ -12,8 +13,6 @@
 #include <thread>
 
 namespace srd::core { class Session; }
-
-namespace srd::network { class DiscoveryBeacon; }
 
 namespace srd::video {
 class ScreenProducer;

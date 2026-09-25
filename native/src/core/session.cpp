@@ -1,6 +1,7 @@
 #include "core/session.h"
 
 #include <array>
+#include <utility>
 #include <vector>
 
 namespace srd::core {

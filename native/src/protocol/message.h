@@ -22,6 +22,12 @@ enum class MessageType : std::uint8_t {
     AuthResponse = 11,
     AuthOk = 12,
     SecureEnvelope = 13,
+
+    MouseMove = 20,
+    MouseButton = 21,
+    MouseWheel = 22,
+    Key = 23,
+    Disconnect = 24,
 };
 
 struct Message {

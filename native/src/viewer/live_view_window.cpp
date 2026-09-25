@@ -1,6 +1,8 @@
 #include "viewer/live_view_window.h"
 
 #include "control/control_client.h"
+#include "transfer/file_channel.h"
+#include "transfer/clipboard_files.h"
 #include <windowsx.h>
 
 #include <algorithm>
@@ -44,10 +46,17 @@ RECT fit_rect(
 
 LiveViewWindow::LiveViewWindow(
     DecodedFrameMailbox& mailbox,
-    control::ControlClient* control)
+    control::ControlClient* control,
+    transfer::FileClient* files)
     : mailbox_(mailbox),
-      control_(control)
+      control_(control),
+      files_(files)
 {
+}
+
+LiveViewWindow::~LiveViewWindow()
+{
+    join_file_task();
 }
 
 int LiveViewWindow::run(HINSTANCE instance, int showCommand)
@@ -210,6 +219,28 @@ LRESULT LiveViewWindow::handle_message(
     case WM_SYSKEYDOWN: {
         const std::uint16_t vk = static_cast<std::uint16_t>(wParam & 0xffff);
 
+        const bool ctrlDown =
+            (::GetKeyState(VK_CONTROL) & 0x8000) != 0;
+
+        if (ctrlDown && vk == 'C' && files_ && control_ &&
+            (lParam & (1u << 30)) == 0) {
+            try {
+                control_->key('C', true);
+                control_->key('C', false);
+            } catch (...) {}
+            start_remote_copy_files();
+            return 0;
+        }
+
+        if (ctrlDown && vk == 'V' && files_ && control_ &&
+            (lParam & (1u << 30)) == 0) {
+            const auto localFiles = transfer::get_clipboard_files();
+            if (!localFiles.empty()) {
+                start_remote_paste_files();
+                return 0;
+            }
+        }
+
         if (vk == VK_F11 && (lParam & (1u << 30)) == 0) {
             toggle_fullscreen(hwnd);
             return 0;
@@ -234,8 +265,10 @@ LRESULT LiveViewWindow::handle_message(
     case WM_SYSKEYUP: {
         const std::uint16_t vk = static_cast<std::uint16_t>(wParam & 0xffff);
         if (control_ && control_->connected() && vk < 256) {
-            pressedKeys_[vk] = false;
-            try { control_->key(vk, false); } catch (...) {}
+            if (pressedKeys_[vk]) {
+                pressedKeys_[vk] = false;
+                try { control_->key(vk, false); } catch (...) {}
+            }
             return 0;
         }
         break;
@@ -378,6 +411,53 @@ void LiveViewWindow::release_pressed_keys() noexcept
         pressedKeys_[vk] = false;
         try { control_->key(vk, false); } catch (...) {}
     }
+}
+
+void LiveViewWindow::join_file_task() noexcept
+{
+    if (fileThread_.joinable()) {
+        fileThread_.join();
+    }
+    fileBusy_.store(false, std::memory_order_release);
+}
+
+void LiveViewWindow::start_remote_copy_files()
+{
+    if (!files_ || fileBusy_.exchange(true))
+        return;
+
+    if (fileThread_.joinable())
+        fileThread_.join();
+
+    fileThread_ = std::thread([this] {
+        ::Sleep(350);
+        try {
+            files_->download_remote_clipboard();
+        }
+        catch (...) {
+        }
+        fileBusy_.store(false, std::memory_order_release);
+    });
+}
+
+void LiveViewWindow::start_remote_paste_files()
+{
+    if (!files_ || !control_ || fileBusy_.exchange(true))
+        return;
+
+    if (fileThread_.joinable())
+        fileThread_.join();
+
+    fileThread_ = std::thread([this] {
+        try {
+            if (files_->upload_local_clipboard()) {
+                control_->key_combo({VK_CONTROL, static_cast<std::uint16_t>('V')});
+            }
+        }
+        catch (...) {
+        }
+        fileBusy_.store(false, std::memory_order_release);
+    });
 }
 
 void LiveViewWindow::paint(HWND hwnd)

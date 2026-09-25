@@ -1,0 +1,25 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <UseWindowsForms>true</UseWindowsForms>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>SimpleRemoteDesk</AssemblyName>
+    <RootNamespace>SimpleRemoteDesk</RootNamespace>
+    <Version>2.11.4</Version>
+    <ApplicationIcon>..\RemoteHost\AppIcon.ico</ApplicationIcon>
+    <StartupObject>SimpleRemoteDesk.Program</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.3.0" />
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\RemoteHost\*.cs" Exclude="..\RemoteHost\Program.cs" Link="Host\%(Filename)%(Extension)" />
+    <Compile Include="..\RemoteViewer\*.cs" Exclude="..\RemoteViewer\Program.cs" Link="Viewer\%(Filename)%(Extension)" />
+    <EmbeddedResource Include="..\RemoteHost\BrandLogo.png" LogicalName="BrandLogo.png" />
+  </ItemGroup>
+</Project>

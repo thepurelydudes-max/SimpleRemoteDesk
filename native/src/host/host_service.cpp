@@ -4,6 +4,7 @@
 #include "core/session.h"
 #include "core/tcp_socket.h"
 #include "input/control_message.h"
+#include "network/discovery.h"
 #include "input/injector.h"
 #include "protocol/message.h"
 #include "security/auth.h"
@@ -134,6 +135,11 @@ void HostService::start(HostConfig config)
         producer_->start(config_.fps, config_.jpegQuality);
         videoServer_->start();
 
+        discoveryBeacon_ = std::make_unique<network::DiscoveryBeacon>();
+        discoveryBeacon_->start(
+            config_.hostId.empty() ? "native-host" : config_.hostId,
+            config_.port);
+
         controlThread_ = std::thread(
             &HostService::control_server_loop,
             this);
@@ -169,6 +175,10 @@ void HostService::stop() noexcept
         }
     }
 
+    if (discoveryBeacon_) {
+        discoveryBeacon_->stop();
+    }
+
     if (videoServer_) {
         videoServer_->stop();
     }
@@ -185,6 +195,7 @@ void HostService::stop() noexcept
         controlThread_.join();
     }
 
+    discoveryBeacon_.reset();
     videoServer_.reset();
     producer_.reset();
     videoMailbox_.reset();

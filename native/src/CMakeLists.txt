@@ -13,6 +13,7 @@ add_library(srd_core STATIC
     video/latest_frame_mailbox.cpp
     video/screen_producer.cpp
     video/frame_packet.cpp
+    video/video_channel.cpp
 )
 
 target_include_directories(srd_core PUBLIC

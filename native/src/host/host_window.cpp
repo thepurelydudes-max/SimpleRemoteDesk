@@ -1,6 +1,7 @@
 #include "host/host_window.h"
 
 #include "ui/theme.h"
+#include "ui/dpi.h"
 
 #include <windowsx.h>
 
@@ -115,10 +116,16 @@ int HostWindow::run(HINSTANCE instance, int showCommand)
         return 1;
     }
 
-    RECT desired{0, 0, 1060, 862};
+    const UINT dpi = ui::system_dpi();
+    RECT desired{
+        0,
+        0,
+        ui::scale_value(1060, dpi),
+        ui::scale_value(820, dpi)};
+
     ::AdjustWindowRectEx(
         &desired,
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        WS_OVERLAPPEDWINDOW,
         FALSE,
         0);
 
@@ -126,7 +133,7 @@ int HostWindow::run(HINSTANCE instance, int showCommand)
         0,
         kClassName,
         L"Simple Remote Host",
-        WS_OVERLAPPED | WS_CAPTION | WS_SYSMENU | WS_MINIMIZEBOX,
+        WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
         desired.right - desired.left,
@@ -203,6 +210,14 @@ LRESULT HostWindow::handle_message(
     case WM_SIZE:
         layout_controls(hwnd);
         return 0;
+
+    case WM_GETMINMAXINFO: {
+        auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
+        const UINT dpi = ui::window_dpi(hwnd);
+        info->ptMinTrackSize.x = ui::scale_value(900, dpi);
+        info->ptMinTrackSize.y = ui::scale_value(700, dpi);
+        return 0;
+    }
 
     case WM_SRD_STATUS: {
         std::unique_ptr<std::wstring> text(
@@ -419,20 +434,135 @@ void HostWindow::create_controls(HWND hwnd)
     layout_controls(hwnd);
 }
 
-void HostWindow::layout_controls(HWND)
+void HostWindow::layout_controls(HWND hwnd)
 {
-    ::SetWindowPos(portEdit_, nullptr, 62, 198, 380, 34, SWP_NOZORDER);
-    ::SetWindowPos(passwordEdit_, nullptr, 572, 198, 420, 34, SWP_NOZORDER);
-    ::SetWindowPos(showPassword_, nullptr, 572, 244, 170, 28, SWP_NOZORDER);
-    ::SetWindowPos(newPasswordButton_, nullptr, 806, 238, 186, 42, SWP_NOZORDER);
+    RECT client{};
+    ::GetClientRect(hwnd, &client);
 
-    ::SetWindowPos(fpsEdit_, nullptr, 62, 486, 380, 34, SWP_NOZORDER);
-    ::SetWindowPos(qualityEdit_, nullptr, 572, 486, 420, 34, SWP_NOZORDER);
-    ::SetWindowPos(audioEnabled_, nullptr, 62, 540, 360, 30, SWP_NOZORDER);
-    ::SetWindowPos(autostart_, nullptr, 62, 575, 600, 30, SWP_NOZORDER);
+    const UINT dpi = ui::window_dpi(hwnd);
+    const auto S = [dpi](int value) {
+        return ui::scale_value(value, dpi);
+    };
 
-    ::SetWindowPos(startButton_, nullptr, 602, 755, 190, 42, SWP_NOZORDER);
-    ::SetWindowPos(disconnectButton_, nullptr, 802, 755, 190, 42, SWP_NOZORDER);
+    const int width = std::max(1, client.right - client.left);
+    const int height = std::max(1, client.bottom - client.top);
+
+    const int margin = S(24);
+    const int gap = S(20);
+    const int headerHeight = S(92);
+
+    const int cardLeft = margin;
+    const int cardRight = width - margin;
+    const int cardWidth = std::max(S(600), cardRight - cardLeft);
+
+    const int accessTop = headerHeight + S(18);
+    const int accessHeight = S(230);
+    const int qualityTop = accessTop + accessHeight + gap;
+    const int qualityHeight = S(205);
+    const int statusTop = qualityTop + qualityHeight + gap;
+    const int statusBottom = height - margin;
+    const int statusHeight = std::max(S(150), statusBottom - statusTop);
+
+    const int innerLeft = cardLeft + S(38);
+    const int innerRight = cardRight - S(38);
+    const int columnGap = S(54);
+    const int columnWidth =
+        std::max(S(260), (innerRight - innerLeft - columnGap) / 2);
+
+    const int leftX = innerLeft;
+    const int rightX = innerLeft + columnWidth + columnGap;
+
+    const int editHeight = S(34);
+
+    ::SetWindowPos(
+        portEdit_, nullptr,
+        leftX,
+        accessTop + S(88),
+        columnWidth,
+        editHeight,
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        passwordEdit_, nullptr,
+        rightX,
+        accessTop + S(88),
+        columnWidth,
+        editHeight,
+        SWP_NOZORDER);
+
+    const int passwordActionTop = accessTop + S(132);
+
+    ::SetWindowPos(
+        showPassword_, nullptr,
+        rightX,
+        passwordActionTop,
+        S(180),
+        S(28),
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        newPasswordButton_, nullptr,
+        std::max(rightX + S(190), rightX + columnWidth - S(176)),
+        passwordActionTop - S(6),
+        S(176),
+        S(40),
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        fpsEdit_, nullptr,
+        leftX,
+        qualityTop + S(88),
+        columnWidth,
+        editHeight,
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        qualityEdit_, nullptr,
+        rightX,
+        qualityTop + S(88),
+        columnWidth,
+        editHeight,
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        audioEnabled_, nullptr,
+        leftX,
+        qualityTop + S(134),
+        S(330),
+        S(28),
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        autostart_, nullptr,
+        leftX,
+        qualityTop + S(166),
+        std::min(S(610), cardWidth - S(76)),
+        S(28),
+        SWP_NOZORDER);
+
+    const int buttonHeight = S(42);
+    const int buttonWidth = S(190);
+    const int buttonGap = S(12);
+    const int buttonsTop =
+        std::max(statusTop + S(94), statusBottom - buttonHeight - S(18));
+
+    ::SetWindowPos(
+        disconnectButton_, nullptr,
+        cardRight - S(38) - buttonWidth,
+        buttonsTop,
+        buttonWidth,
+        buttonHeight,
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        startButton_, nullptr,
+        cardRight - S(38) - buttonWidth * 2 - buttonGap,
+        buttonsTop,
+        buttonWidth,
+        buttonHeight,
+        SWP_NOZORDER);
+
+    (void)statusHeight;
 }
 
 void HostWindow::paint(HWND hwnd)
@@ -442,49 +572,79 @@ void HostWindow::paint(HWND hwnd)
 
     RECT client{};
     ::GetClientRect(hwnd, &client);
+
+    const UINT dpi = ui::window_dpi(hwnd);
+    const auto S = [dpi](int value) {
+        return ui::scale_value(value, dpi);
+    };
+
+    const int width = client.right - client.left;
+    const int height = client.bottom - client.top;
+
+    const int margin = S(24);
+    const int gap = S(20);
+    const int headerHeight = S(92);
+
+    const int cardLeft = margin;
+    const int cardRight = width - margin;
+    const int accessTop = headerHeight + S(18);
+    const int accessHeight = S(230);
+    const int qualityTop = accessTop + accessHeight + gap;
+    const int qualityHeight = S(205);
+    const int statusTop = qualityTop + qualityHeight + gap;
+    const int statusBottom = height - margin;
+
+    const int innerLeft = cardLeft + S(28);
+    const int innerRight = cardRight - S(28);
+    const int columnGap = S(54);
+    const int columnWidth =
+        std::max(S(260), (innerRight - innerLeft - columnGap) / 2);
+
+    const int leftX = innerLeft + S(10);
+    const int rightX = leftX + columnWidth + columnGap;
+
     ui::fill_rect(dc, client, ui::Bg);
+    ui::fill_rect(dc, RECT{0, 0, width, headerHeight}, ui::Header);
 
-    RECT header{0, 0, client.right, 92};
-    ui::fill_rect(dc, header, ui::Header);
-
-    RECT title{94, 17, 600, 50};
     ui::draw_text(
         dc,
         L"Simple Remote Host",
-        title,
+        RECT{S(84), S(16), std::min(width - margin, S(620)), S(50)},
         ui::Text,
         fontTitle_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
-    RECT subtitle{95, 52, 760, 78};
     ui::draw_text(
         dc,
         L"Постоянный удалённый доступ к этому компьютеру",
-        subtitle,
+        RECT{S(85), S(50), width - margin, S(78)},
         ui::Muted,
         font_,
-        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
-    const RECT accessCard{24, 110, 1036, 376};
-    const RECT qualityCard{24, 394, 1036, 618};
-    const RECT statusCard{24, 636, 1036, 838};
+    const RECT accessCard{
+        cardLeft, accessTop, cardRight, accessTop + accessHeight};
+    const RECT qualityCard{
+        cardLeft, qualityTop, cardRight, qualityTop + qualityHeight};
+    const RECT statusCard{
+        cardLeft, statusTop, cardRight, std::max(statusTop + S(140), statusBottom)};
 
-    ui::fill_round_rect(dc, accessCard, 20, ui::Surface, ui::BorderSoft);
-    ui::fill_round_rect(dc, qualityCard, 20, ui::Surface, ui::BorderSoft);
-    ui::fill_round_rect(dc, statusCard, 20, ui::Surface, ui::BorderSoft);
+    ui::fill_round_rect(dc, accessCard, S(18), ui::Surface, ui::BorderSoft);
+    ui::fill_round_rect(dc, qualityCard, S(18), ui::Surface, ui::BorderSoft);
+    ui::fill_round_rect(dc, statusCard, S(18), ui::Surface, ui::BorderSoft);
 
     ui::draw_text(
         dc,
         L"Доступ",
-        make_rect(52, 130, 300, 160),
+        RECT{innerLeft, accessTop + S(18), innerRight, accessTop + S(48)},
         ui::Text,
         fontLarge_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     ui::draw_text(
         dc,
-        L"Порт, пароль и адреса для подключения",
-        make_rect(52, 160, 600, 186),
+        L"Порт, пароль и параметры подключения",
+        RECT{innerLeft, accessTop + S(48), innerRight, accessTop + S(72)},
         ui::Muted,
         font_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -492,7 +652,7 @@ void HostWindow::paint(HWND hwnd)
     ui::draw_text(
         dc,
         L"Базовый порт",
-        make_rect(62, 174, 300, 198),
+        RECT{leftX, accessTop + S(68), leftX + columnWidth, accessTop + S(90)},
         ui::Muted,
         font_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -500,7 +660,7 @@ void HostWindow::paint(HWND hwnd)
     ui::draw_text(
         dc,
         L"Пароль",
-        make_rect(572, 174, 800, 198),
+        RECT{rightX, accessTop + S(68), rightX + columnWidth, accessTop + S(90)},
         ui::Muted,
         font_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -508,15 +668,15 @@ void HostWindow::paint(HWND hwnd)
     ui::draw_text(
         dc,
         L"Качество",
-        make_rect(52, 414, 300, 444),
+        RECT{innerLeft, qualityTop + S(18), innerRight, qualityTop + S(48)},
         ui::Text,
         fontLarge_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
     ui::draw_text(
         dc,
-        L"Частота кадров и качество изображения",
-        make_rect(52, 444, 600, 470),
+        L"Частота кадров, качество изображения и системный звук",
+        RECT{innerLeft, qualityTop + S(48), innerRight, qualityTop + S(72)},
         ui::Muted,
         font_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -524,7 +684,7 @@ void HostWindow::paint(HWND hwnd)
     ui::draw_text(
         dc,
         L"FPS",
-        make_rect(62, 462, 300, 486),
+        RECT{leftX, qualityTop + S(68), leftX + columnWidth, qualityTop + S(90)},
         ui::Muted,
         font_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -532,7 +692,7 @@ void HostWindow::paint(HWND hwnd)
     ui::draw_text(
         dc,
         L"JPEG качество, %",
-        make_rect(572, 462, 850, 486),
+        RECT{rightX, qualityTop + S(68), rightX + columnWidth, qualityTop + S(90)},
         ui::Muted,
         font_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -542,15 +702,30 @@ void HostWindow::paint(HWND hwnd)
 
     HBRUSH dotBrush = ::CreateSolidBrush(
         running ? ui::Success : ui::Offline);
+    HPEN nullPen = ::CreatePen(PS_NULL, 0, 0);
+    HGDIOBJ oldBrush = ::SelectObject(dc, dotBrush);
+    HGDIOBJ oldPen = ::SelectObject(dc, nullPen);
 
-    ::SelectObject(dc, dotBrush);
-    ::Ellipse(dc, 54, 670, 68, 684);
+    ::Ellipse(
+        dc,
+        innerLeft,
+        statusTop + S(28),
+        innerLeft + S(14),
+        statusTop + S(42));
+
+    ::SelectObject(dc, oldBrush);
+    ::SelectObject(dc, oldPen);
     ::DeleteObject(dotBrush);
+    ::DeleteObject(nullPen);
 
     ui::draw_text(
         dc,
         running ? L"Host запущен" : L"Host остановлен",
-        make_rect(82, 652, 500, 690),
+        RECT{
+            innerLeft + S(28),
+            statusTop + S(15),
+            innerRight,
+            statusTop + S(52)},
         running ? ui::Success : ui::Offline,
         fontLarge_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -558,10 +733,14 @@ void HostWindow::paint(HWND hwnd)
     ui::draw_text(
         dc,
         serviceStatus_.c_str(),
-        make_rect(82, 688, 620, 716),
+        RECT{
+            innerLeft + S(28),
+            statusTop + S(50),
+            innerRight,
+            statusTop + S(76)},
         ui::Muted,
         font_,
-        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     std::wstring details =
         L"Порт: " + std::to_wstring(settings_.port) +
@@ -572,10 +751,14 @@ void HostWindow::paint(HWND hwnd)
     ui::draw_text(
         dc,
         details.c_str(),
-        make_rect(52, 720, 950, 748),
+        RECT{
+            innerLeft,
+            statusTop + S(82),
+            innerRight,
+            std::min(statusBottom - S(8), statusTop + S(112))},
         ui::Text,
         font_,
-        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     ::EndPaint(hwnd, &ps);
 }

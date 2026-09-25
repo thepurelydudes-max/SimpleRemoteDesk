@@ -6,6 +6,8 @@ add_library(srd_core STATIC
     security/crypto.cpp
     security/auth.cpp
     security/secure_session.cpp
+    input/control_message.cpp
+    input/injector.cpp
 )
 
 target_include_directories(srd_core PUBLIC
@@ -22,6 +24,7 @@ target_compile_definitions(srd_core PUBLIC
 target_link_libraries(srd_core PUBLIC
     ws2_32
     bcrypt
+    user32
 )
 
 add_executable(SimpleRemoteHost

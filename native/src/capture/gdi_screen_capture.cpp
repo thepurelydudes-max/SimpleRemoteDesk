@@ -1,4 +1,5 @@
 #include "capture/gdi_screen_capture.h"
+#include "capture/dxgi_screen_capture.h"
 
 #include <cstring>
 #include <stdexcept>
@@ -142,11 +143,19 @@ bool GdiScreenCapture::next_frame(Frame& frame)
 
 std::unique_ptr<IScreenCapture> create_best_capture()
 {
-    auto capture = std::make_unique<GdiScreenCapture>();
-    if (!capture->start()) {
+    {
+        auto capture = std::make_unique<DxgiScreenCapture>();
+        if (capture->start()) {
+            return capture;
+        }
+    }
+
+    auto fallback = std::make_unique<GdiScreenCapture>();
+    if (!fallback->start()) {
         return {};
     }
-    return capture;
+
+    return fallback;
 }
 
 } // namespace srd::capture

@@ -44,6 +44,7 @@ private:
     HWND fpsEdit_{nullptr};
     HWND qualityEdit_{nullptr};
     HWND showPassword_{nullptr};
+    HWND audioEnabled_{nullptr};
     HWND autostart_{nullptr};
     HWND startButton_{nullptr};
     HWND disconnectButton_{nullptr};

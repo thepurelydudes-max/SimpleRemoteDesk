@@ -10,6 +10,8 @@ add_library(srd_core STATIC
     input/injector.cpp
     control/control_client.cpp
     host/host_service.cpp
+    ui/theme.cpp
+    settings/settings.cpp
     capture/gdi_screen_capture.cpp
     codec/jpeg_wic.cpp
     codec/jpeg_wic_decoder.cpp
@@ -91,4 +93,18 @@ add_executable(SimpleRemoteViewerGui WIN32
 target_link_libraries(SimpleRemoteViewerGui PRIVATE
     srd_core
     shell32
+)
+
+
+add_executable(SimpleRemoteHostGui WIN32
+    host/gui_main.cpp
+    host/host_window.cpp
+)
+
+target_link_libraries(SimpleRemoteHostGui PRIVATE
+    srd_core
+    shell32
+    crypt32
+    advapi32
+    dwmapi
 )

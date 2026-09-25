@@ -4,9 +4,9 @@
 #include "viewer/live_view_window.h"
 
 #include <windows.h>
+#include <shellapi.h>
 #include <objbase.h>
 
-#include <atomic>
 #include <memory>
 #include <string>
 #include <thread>
@@ -14,7 +14,7 @@
 int WINAPI wWinMain(
     HINSTANCE instance,
     HINSTANCE,
-    PWSTR commandLine,
+    PWSTR,
     int showCommand)
 {
     int argc = 0;
@@ -47,19 +47,13 @@ int WINAPI wWinMain(
 
     srd::viewer::DecodedFrameMailbox mailbox;
     srd::viewer::LiveViewWindow window(mailbox);
-
-    std::atomic<bool> windowReady{false};
+    srd::video::VideoClient client(host, password, 45902);
 
     std::thread videoThread([&] {
         const HRESULT hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
         const bool comInitialized = SUCCEEDED(hr);
 
         try {
-            while (!windowReady.load(std::memory_order_acquire)) {
-                ::Sleep(10);
-            }
-
-            srd::video::VideoClient client(host, password, 45902);
             client.receive_forever([&](srd::video::EncodedFrame&& frame) {
                 auto decoded = std::make_shared<srd::codec::DecodedBitmap>(
                     srd::codec::decode_jpeg_wic(frame.jpeg));
@@ -69,8 +63,7 @@ int WINAPI wWinMain(
             });
         }
         catch (...) {
-            // First GUI milestone: connection errors simply stop the video thread.
-            // Status UI and reconnect policy are added in the next step.
+            // Connection/status UI and reconnect policy come next.
         }
 
         if (comInitialized) {
@@ -78,13 +71,12 @@ int WINAPI wWinMain(
         }
     });
 
-    windowReady.store(true, std::memory_order_release);
     const int exitCode = window.run(instance, showCommand);
 
-    // The process is exiting; a blocking network receive is allowed to end with process
-    // teardown in this first GUI milestone. A cancellable VideoClient follows next.
+    client.stop();
+
     if (videoThread.joinable()) {
-        videoThread.detach();
+        videoThread.join();
     }
 
     return exitCode;

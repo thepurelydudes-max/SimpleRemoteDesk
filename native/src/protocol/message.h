@@ -1,0 +1,31 @@
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <span>
+#include <vector>
+
+namespace srd::protocol {
+
+constexpr std::uint32_t kMagic = 0x31524453; // "SRD1" in little-endian memory
+constexpr std::uint16_t kVersion = 1;
+constexpr std::size_t kHeaderSize = 12;
+constexpr std::uint32_t kMaxPayload = 16u * 1024u * 1024u;
+
+enum class MessageType : std::uint8_t {
+    Hello = 1,
+    HelloAck = 2,
+    Ping = 3,
+    Pong = 4,
+};
+
+struct Message {
+    MessageType type{};
+    std::vector<std::byte> payload;
+};
+
+std::vector<std::byte> encode(MessageType type, std::span<const std::byte> payload);
+Message decode(std::span<const std::byte> header, std::span<const std::byte> payload);
+std::uint32_t payload_size_from_header(std::span<const std::byte> header);
+
+} // namespace srd::protocol

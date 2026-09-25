@@ -57,7 +57,7 @@ private:
     std::thread worker_;
     std::atomic<bool> running_{false};
     Callback callback_;
-    std::uintptr_t socketValue_{static_cast<std::uintptr_t>(-1)};
+    std::atomic<std::uintptr_t> socketValue_{static_cast<std::uintptr_t>(-1)};
 };
 
 } // namespace srd::network

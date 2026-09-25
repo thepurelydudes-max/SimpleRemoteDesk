@@ -207,11 +207,10 @@ LRESULT HostWindow::handle_message(
 
         if (id == IDC_NEW_PASSWORD && code == BN_CLICKED) {
             try {
+                const std::string generated = settings::generate_password();
                 set_text(
                     passwordEdit_,
-                    std::wstring(
-                        settings::generate_password().begin(),
-                        settings::generate_password().end()));
+                    std::wstring(generated.begin(), generated.end()));
             }
             catch (...) {
             }
@@ -690,12 +689,11 @@ void HostWindow::update_status_controls()
 std::wstring HostWindow::get_text(HWND control)
 {
     const int length = ::GetWindowTextLengthW(control);
-    std::wstring text(static_cast<std::size_t>(length), L'\0');
+    if (length <= 0) return {};
 
-    if (length > 0) {
-        ::GetWindowTextW(control, text.data(), length + 1);
-    }
-
+    std::wstring text(static_cast<std::size_t>(length + 1), L'\0');
+    ::GetWindowTextW(control, text.data(), length + 1);
+    text.resize(static_cast<std::size_t>(length));
     return text;
 }
 

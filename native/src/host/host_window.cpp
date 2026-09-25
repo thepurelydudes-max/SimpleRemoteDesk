@@ -61,9 +61,11 @@ void set_control_font(HWND control, HFONT font)
 
 HostWindow::HostWindow(
     HostService& service,
-    settings::HostSettings settings)
+    settings::HostSettings settings,
+    bool stopServiceOnClose)
     : service_(service),
-      settings_(std::move(settings))
+      settings_(std::move(settings)),
+      stopServiceOnClose_(stopServiceOnClose)
 {
     font_ = ui::create_font(10);
     fontSemibold_ = ui::create_font(10, FW_SEMIBOLD);
@@ -296,7 +298,7 @@ LRESULT HostWindow::handle_message(
         catch (...) {
         }
 
-        service_.stop();
+        if (stopServiceOnClose_) service_.stop();
         ::DestroyWindow(hwnd);
         return 0;
 

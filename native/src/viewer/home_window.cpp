@@ -80,6 +80,7 @@ ViewerHomeWindow::ViewerHomeWindow()
     fontTitle_ = ui::create_font(18, FW_SEMIBOLD);
     fontSection_ = ui::create_font(12, FW_SEMIBOLD);
     editBrush_ = ::CreateSolidBrush(ui::Surface2);
+    listBrush_ = ::CreateSolidBrush(ui::Bg);
 }
 
 ViewerHomeWindow::~ViewerHomeWindow()
@@ -87,6 +88,7 @@ ViewerHomeWindow::~ViewerHomeWindow()
     discovery_.stop();
 
     if (editBrush_) ::DeleteObject(editBrush_);
+    if (listBrush_) ::DeleteObject(listBrush_);
     if (font_) ::DeleteObject(font_);
     if (fontSemibold_) ::DeleteObject(fontSemibold_);
     if (fontTitle_) ::DeleteObject(fontTitle_);
@@ -319,7 +321,7 @@ LRESULT ViewerHomeWindow::handle_message(
         HDC dc = reinterpret_cast<HDC>(wParam);
         ::SetTextColor(dc, ui::Text);
         ::SetBkColor(dc, ui::Bg);
-        return reinterpret_cast<LRESULT>(::GetStockObject(BLACK_BRUSH));
+        return reinterpret_cast<LRESULT>(listBrush_);
     }
 
     case WM_CTLCOLORSTATIC:

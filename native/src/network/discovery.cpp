@@ -200,7 +200,7 @@ void DiscoveryListener::stop() noexcept
         return;
     }
 
-    const SOCKET sock = static_cast<SOCKET>(socketValue_);
+    const SOCKET sock = static_cast<SOCKET>(socketValue_.load(std::memory_order_acquire));
     if (sock != INVALID_SOCKET) {
         ::closesocket(sock);
     }
@@ -209,7 +209,7 @@ void DiscoveryListener::stop() noexcept
         worker_.join();
     }
 
-    socketValue_ = static_cast<std::uintptr_t>(INVALID_SOCKET);
+    socketValue_.store(static_cast<std::uintptr_t>(INVALID_SOCKET), std::memory_order_release);
     callback_ = {};
     runtime_.reset();
 }
@@ -222,7 +222,7 @@ void DiscoveryListener::run()
         return;
     }
 
-    socketValue_ = static_cast<std::uintptr_t>(sock);
+    socketValue_.store(static_cast<std::uintptr_t>(sock), std::memory_order_release);
 
     BOOL reuse = TRUE;
     ::setsockopt(

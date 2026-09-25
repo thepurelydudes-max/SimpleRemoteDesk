@@ -106,7 +106,7 @@ protocol::Message SecureSession::receive()
         throw std::runtime_error("secure sequence mismatch");
     }
 
-    std::span<const std::byte> iv(
+    std::span<const std::byte, kIvSize> iv(
         envelope.payload.data() + kSequenceSize,
         kIvSize);
 

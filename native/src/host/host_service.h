@@ -13,6 +13,7 @@
 #include <thread>
 
 namespace srd::core { class Session; }
+namespace srd::audio { class AudioServer; }
 
 namespace srd::video {
 class ScreenProducer;
@@ -27,6 +28,7 @@ struct HostConfig {
     unsigned int fps{30};
     float jpegQuality{0.90f};
     std::string hostId;
+    bool audioEnabled{true};
 };
 
 class HostService {
@@ -61,6 +63,7 @@ private:
     std::unique_ptr<video::ScreenProducer> producer_;
     std::unique_ptr<video::VideoServer> videoServer_;
     std::unique_ptr<network::DiscoveryBeacon> discoveryBeacon_;
+    std::unique_ptr<audio::AudioServer> audioServer_;
 
     std::thread controlThread_;
     core::Session* activeControlSession_{nullptr};

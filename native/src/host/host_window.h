@@ -10,7 +10,7 @@ namespace srd::host {
 
 class HostWindow {
 public:
-    HostWindow(HostService& service, settings::HostSettings settings);
+    HostWindow(HostService& service, settings::HostSettings settings, bool stopServiceOnClose = true);
     ~HostWindow();
 
     int run(HINSTANCE instance, int showCommand);
@@ -58,6 +58,7 @@ private:
     HBRUSH editBrush_{nullptr};
 
     std::wstring serviceStatus_{L"Host остановлен"};
+    bool stopServiceOnClose_{true};
 };
 
 } // namespace srd::host

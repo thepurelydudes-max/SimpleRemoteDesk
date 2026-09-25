@@ -17,6 +17,7 @@ int main(int argc, char** argv)
         ? static_cast<float>(std::stoi(argv[4])) / 100.0f
         : 0.90f;
     config.hostId = "console-host";
+    config.audioEnabled = true;
 
     try {
         srd::host::HostService host;

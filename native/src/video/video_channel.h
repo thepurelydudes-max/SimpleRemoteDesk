@@ -4,8 +4,9 @@
 
 #include <atomic>
 #include <cstdint>
+#include <functional>
 #include <string>
-#include <string_view>
+#include <thread>
 
 namespace srd::video {
 
@@ -31,17 +32,15 @@ private:
     std::string password_;
     std::uint16_t port_;
     std::atomic<bool> running_{false};
-    void* threadHandle_{nullptr};
+    std::thread worker_;
 };
 
 class VideoClient {
 public:
     VideoClient(std::string host, std::string password, std::uint16_t port = 45902);
 
-    // Receives frames until the connection is closed or an error occurs.
-    // onFrame is invoked on the caller thread for each decoded frame packet.
-    template <typename Callback>
-    void receive_loop(Callback&& onFrame);
+    void receive_forever(
+        const std::function<void(EncodedFrame&&)>& onFrame);
 
 private:
     std::string host_;

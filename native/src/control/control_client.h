@@ -7,6 +7,7 @@
 
 #include <atomic>
 #include <cstdint>
+#include <initializer_list>
 #include <memory>
 #include <mutex>
 #include <string>
@@ -30,6 +31,7 @@ public:
     void mouse_button(input::MouseButton button, bool down);
     void mouse_wheel(std::int32_t delta);
     void key(std::uint16_t virtualKey, bool down);
+    void key_combo(std::initializer_list<std::uint16_t> keys);
 
 private:
     void send(protocol::MessageType type, std::span<const std::byte> payload = {});

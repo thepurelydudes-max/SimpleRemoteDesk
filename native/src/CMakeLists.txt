@@ -17,6 +17,7 @@ add_library(srd_core STATIC
     audio/loopback_capture.cpp
     host/host_service.cpp
     ui/theme.cpp
+    ui/dpi.cpp
     settings/settings.cpp
     settings/profiles.cpp
     network/discovery.cpp

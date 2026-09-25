@@ -1,3 +1,4 @@
+#include "viewer/home_window.h"
 #include "viewer/session_runner.h"
 
 #include <windows.h>
@@ -35,14 +36,44 @@ int WINAPI wWinMain(
     int argc = 0;
     LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
 
-    const std::wstring hostWide = argc > 1 ? argv[1] : L"127.0.0.1";
-    const std::wstring passwordWide = argc > 2 ? argv[2] : L"change-me";
+    if (argc > 2) {
+        const std::wstring hostWide = argv[1];
+        const std::wstring passwordWide = argv[2];
+
+        if (argv) ::LocalFree(argv);
+
+        return srd::viewer::run_live_session(
+            instance,
+            narrow(hostWide),
+            narrow(passwordWide),
+            showCommand);
+    }
 
     if (argv) ::LocalFree(argv);
 
-    return srd::viewer::run_live_session(
-        instance,
-        narrow(hostWide),
-        narrow(passwordWide),
-        showCommand);
+    for (;;) {
+        srd::viewer::ViewerHomeWindow home;
+        auto selected = home.run(instance, showCommand);
+
+        if (!selected) {
+            return 0;
+        }
+
+        if (selected->password.size() < 6) {
+            ::MessageBoxW(
+                nullptr,
+                L"Для выбранного компьютера не сохранён корректный пароль.",
+                L"Simple Remote Viewer",
+                MB_OK | MB_ICONINFORMATION);
+            continue;
+        }
+
+        srd::viewer::run_live_session(
+            instance,
+            selected->host,
+            selected->password,
+            SW_SHOW);
+
+        showCommand = SW_SHOW;
+    }
 }

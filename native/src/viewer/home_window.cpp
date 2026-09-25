@@ -4,6 +4,7 @@
 #include "viewer/profile_dialog.h"
 
 #include <windowsx.h>
+#include <commctrl.h>
 
 #include <algorithm>
 #include <cwctype>

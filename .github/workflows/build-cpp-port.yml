@@ -1,0 +1,32 @@
+name: build-cpp-port
+on:
+  push:
+    branches: [ cpp-port ]
+  workflow_dispatch:
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Build native core
+        shell: pwsh
+        run: |
+          cmake -S NativeCore -B NativeCore/build -A x64
+          cmake --build NativeCore/build --config Release
+      - name: Build application
+        shell: pwsh
+        run: |
+          dotnet restore SimpleRemoteDesk/SimpleRemoteDesk.csproj
+          dotnet publish SimpleRemoteDesk/SimpleRemoteDesk.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=false -p:PublishTrimmed=false -p:DebugType=None -p:DebugSymbols=false -o publish/Runtime
+          Copy-Item NativeCore/build/Release/SimpleRemoteDesk.Native.dll publish/Runtime/
+          Copy-Item publish/Runtime/SimpleRemoteDesk.exe publish/SimpleRemoteDesk.exe
+          Copy-Item README_RU.txt publish/README.txt
+      - name: Upload Windows x64 build
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleRemoteDesk-cpp-port-win-x64
+          path: publish/
+          if-no-files-found: error

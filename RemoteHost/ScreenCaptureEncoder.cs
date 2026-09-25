@@ -1,77 +1,78 @@
-using System.Drawing.Drawing2D;
-using System.Drawing.Imaging;
+using System.Runtime.InteropServices;
 
 namespace RemoteHost;
 
 internal sealed class ScreenCaptureEncoder : IDisposable
 {
-    private readonly Rectangle _bounds;
-    private readonly Bitmap _captureBitmap;
-    private readonly Graphics _captureGraphics;
-    private readonly Bitmap? _scaledBitmap;
-    private readonly Graphics? _scaledGraphics;
-    private readonly ImageCodecInfo _jpegCodec;
-    private readonly EncoderParameters _encoderParameters;
-    private readonly MemoryStream _stream = new(1024 * 1024);
+    private IntPtr _native;
+    private byte[] _buffer = new byte[1024 * 1024];
+    private readonly int _encodedWidth;
+    private readonly int _encodedHeight;
+    private bool _disposed;
 
-    public int Width => _bounds.Width;
-    public int Height => _bounds.Height;
-    public int EncodedWidth => _scaledBitmap?.Width ?? _captureBitmap.Width;
-    public int EncodedHeight => _scaledBitmap?.Height ?? _captureBitmap.Height;
+    public int Width { get; }
+    public int Height { get; }
+    public int EncodedWidth => _encodedWidth;
+    public int EncodedHeight => _encodedHeight;
 
     public ScreenCaptureEncoder(long quality, int fps, int maxWidth = 0)
     {
-        _bounds = Screen.PrimaryScreen?.Bounds ?? throw new InvalidOperationException("Экран не найден.");
-        _captureBitmap = new Bitmap(_bounds.Width, _bounds.Height, PixelFormat.Format24bppRgb);
-        _captureGraphics = Graphics.FromImage(_captureBitmap);
-        _captureGraphics.CompositingMode = CompositingMode.SourceCopy;
+        Rectangle bounds = Screen.PrimaryScreen?.Bounds ?? throw new InvalidOperationException("Экран не найден.");
+        Width = bounds.Width;
+        Height = bounds.Height;
 
-        if (maxWidth > 0 && _bounds.Width > maxWidth)
+        try
         {
-            double scale = (double)maxWidth / _bounds.Width;
-            int h = Math.Max(1, (int)Math.Round(_bounds.Height * scale));
-            _scaledBitmap = new Bitmap(maxWidth, h, PixelFormat.Format24bppRgb);
-            _scaledGraphics = Graphics.FromImage(_scaledBitmap);
-            _scaledGraphics.CompositingMode = CompositingMode.SourceCopy;
-            _scaledGraphics.CompositingQuality = CompositingQuality.HighQuality;
-            _scaledGraphics.InterpolationMode = InterpolationMode.HighQualityBicubic;
-            _scaledGraphics.SmoothingMode = SmoothingMode.HighQuality;
-            _scaledGraphics.PixelOffsetMode = PixelOffsetMode.HighQuality;
+            _native = NativeMethods.SRD_CaptureCreate((int)Math.Clamp(quality, 20, 100), maxWidth, out _encodedWidth, out _encodedHeight);
+        }
+        catch (DllNotFoundException ex)
+        {
+            throw new InvalidOperationException("Не найден нативный модуль SimpleRemoteDesk.Native.dll.", ex);
+        }
+        catch (EntryPointNotFoundException ex)
+        {
+            throw new InvalidOperationException("Нативный модуль SimpleRemoteDesk.Native.dll несовместим с этой версией программы.", ex);
         }
 
-        _jpegCodec = ImageCodecInfo.GetImageEncoders().First(x => x.FormatID == ImageFormat.Jpeg.Guid);
-        _encoderParameters = new EncoderParameters(1);
-        _encoderParameters.Param[0] = new EncoderParameter(Encoder.Quality, Math.Clamp(quality, 20, 100));
+        if (_native == IntPtr.Zero)
+            throw new InvalidOperationException("Не удалось инициализировать нативный захват экрана.");
     }
 
     public ArraySegment<byte> Capture()
     {
-        _captureGraphics.CopyFromScreen(_bounds.Left, _bounds.Top, 0, 0, _bounds.Size, CopyPixelOperation.SourceCopy);
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        if (NativeMethods.SRD_CaptureFrame(_native, out IntPtr data, out int length) == 0 || data == IntPtr.Zero || length <= 0)
+            throw new InvalidOperationException("Не удалось получить JPEG-кадр из нативного модуля.");
 
-        Image imageToEncode = _captureBitmap;
-        if (_scaledBitmap != null && _scaledGraphics != null)
+        if (_buffer.Length < length)
         {
-            _scaledGraphics.DrawImage(_captureBitmap,
-                new Rectangle(0, 0, _scaledBitmap.Width, _scaledBitmap.Height),
-                0, 0, _captureBitmap.Width, _captureBitmap.Height, GraphicsUnit.Pixel);
-            imageToEncode = _scaledBitmap;
+            int next = _buffer.Length;
+            while (next < length) next = checked(next * 2);
+            _buffer = new byte[next];
         }
 
-        _stream.Position = 0;
-        _stream.SetLength(0);
-        imageToEncode.Save(_stream, _jpegCodec, _encoderParameters);
-        if (!_stream.TryGetBuffer(out ArraySegment<byte> buffer))
-            throw new InvalidOperationException("Не удалось получить JPEG-буфер.");
-        return new ArraySegment<byte>(buffer.Array!, buffer.Offset, checked((int)_stream.Length));
+        Marshal.Copy(data, _buffer, 0, length);
+        return new ArraySegment<byte>(_buffer, 0, length);
     }
 
     public void Dispose()
     {
-        _encoderParameters.Dispose();
-        _scaledGraphics?.Dispose();
-        _scaledBitmap?.Dispose();
-        _captureGraphics.Dispose();
-        _captureBitmap.Dispose();
-        _stream.Dispose();
+        if (_disposed) return;
+        _disposed = true;
+        IntPtr handle = Interlocked.Exchange(ref _native, IntPtr.Zero);
+        if (handle != IntPtr.Zero)
+            NativeMethods.SRD_CaptureDestroy(handle);
+    }
+
+    private static class NativeMethods
+    {
+        [DllImport("SimpleRemoteDesk.Native.dll", CallingConvention = CallingConvention.StdCall)]
+        internal static extern IntPtr SRD_CaptureCreate(int quality, int maxWidth, out int width, out int height);
+
+        [DllImport("SimpleRemoteDesk.Native.dll", CallingConvention = CallingConvention.StdCall)]
+        internal static extern int SRD_CaptureFrame(IntPtr handle, out IntPtr data, out int length);
+
+        [DllImport("SimpleRemoteDesk.Native.dll", CallingConvention = CallingConvention.StdCall)]
+        internal static extern void SRD_CaptureDestroy(IntPtr handle);
     }
 }

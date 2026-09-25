@@ -1,4 +1,5 @@
 #include "codec/jpeg_wic_decoder.h"
+#include "control/control_client.h"
 #include "video/video_channel.h"
 #include "viewer/frame_mailbox.h"
 #include "viewer/live_view_window.h"
@@ -45,8 +46,21 @@ int WINAPI wWinMain(
     const std::string host = narrow(hostWide);
     const std::string password = narrow(passwordWide);
 
+    srd::control::ControlClient control(host, password, 45900);
+    try {
+        control.connect();
+    }
+    catch (...) {
+        ::MessageBoxW(
+            nullptr,
+            L"Не удалось подключить канал управления. Проверьте адрес, пароль и запущенный Host.",
+            L"Simple Remote Viewer",
+            MB_OK | MB_ICONERROR);
+        return 2;
+    }
+
     srd::viewer::DecodedFrameMailbox mailbox;
-    srd::viewer::LiveViewWindow window(mailbox);
+    srd::viewer::LiveViewWindow window(mailbox, &control);
     srd::video::VideoClient client(host, password, 45902);
 
     std::thread videoThread([&] {
@@ -74,6 +88,7 @@ int WINAPI wWinMain(
     const int exitCode = window.run(instance, showCommand);
 
     client.stop();
+    control.disconnect();
 
     if (videoThread.joinable()) {
         videoThread.join();

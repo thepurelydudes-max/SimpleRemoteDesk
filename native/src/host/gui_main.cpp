@@ -1,4 +1,5 @@
 #include "host/host_service.h"
+#include "ui/dpi.h"
 #include "host/host_window.h"
 #include "settings/settings.h"
 
@@ -10,6 +11,8 @@ int WINAPI wWinMain(
     PWSTR,
     int showCommand)
 {
+    srd::ui::enable_dpi_awareness();
+
     try {
         srd::host::HostService service;
         srd::host::HostWindow window(

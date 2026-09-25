@@ -31,6 +31,9 @@ enum class MessageType : std::uint8_t {
 
     SnapshotRequest = 30,
     ScreenFrame = 31,
+
+    AudioFormat = 40,
+    AudioData = 41,
 };
 
 struct Message {

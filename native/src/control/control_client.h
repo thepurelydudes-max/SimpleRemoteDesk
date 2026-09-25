@@ -1,6 +1,7 @@
 #pragma once
 
 #include "core/session.h"
+#include "core/socket_runtime.h"
 #include "security/secure_session.h"
 #include "input/control_message.h"
 
@@ -38,6 +39,7 @@ private:
     std::uint16_t port_;
 
     mutable std::mutex mutex_;
+    std::unique_ptr<net::SocketRuntime> socketRuntime_;
     std::unique_ptr<core::Session> transport_;
     std::unique_ptr<security::SecureSession> secure_;
     std::atomic<bool> connected_{false};

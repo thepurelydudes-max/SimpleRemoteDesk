@@ -5,6 +5,9 @@
 #include "input/injector.h"
 #include "security/auth.h"
 #include "security/secure_session.h"
+#include "video/latest_frame_mailbox.h"
+#include "video/screen_producer.h"
+#include "video/video_channel.h"
 
 #include <cstddef>
 #include <iostream>
@@ -78,11 +81,24 @@ int main(int argc, char** argv)
 
     try {
         srd::net::SocketRuntime sockets;
+        srd::video::LatestFrameMailbox videoMailbox;
+        auto capture = srd::capture::create_best_capture();
+        if (!capture) {
+            throw std::runtime_error("screen capture initialization failed");
+        }
+
+        srd::video::ScreenProducer producer(std::move(capture), videoMailbox);
+        producer.start(15, 0.75f);
+
+        srd::video::VideoServer videoServer(videoMailbox, password, 45902);
+        videoServer.start();
+
         auto listener = srd::net::TcpSocket::listen_on(45900);
 
-        std::cout << "SimpleRemoteHost Native M2\n";
+        std::cout << "SimpleRemoteHost Native M3\n";
         std::cout << "Listening on TCP 45900...\n";
         std::cout << "Authentication enabled\n";
+        std::cout << "Video stream listening on TCP 45902\n";
 
         while (true) {
             auto client = listener.accept_one();

@@ -1,0 +1,31 @@
+# Visual Studio / .NET
+.vs/
+bin/
+obj/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+
+# Build output
+build/
+out/
+dist/
+publish/
+x64/
+x86/
+Debug/
+Release/
+
+# Logs / temp
+*.log
+*.tmp
+*.temp
+Thumbs.db
+.DS_Store
+
+# CMake / C++
+CMakeFiles/
+CMakeCache.txt
+cmake_install.cmake
+compile_commands.json

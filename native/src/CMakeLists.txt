@@ -3,6 +3,9 @@ add_library(srd_core STATIC
     core/tcp_socket.cpp
     core/session.cpp
     protocol/message.cpp
+    security/crypto.cpp
+    security/auth.cpp
+    security/secure_session.cpp
 )
 
 target_include_directories(srd_core PUBLIC
@@ -18,6 +21,7 @@ target_compile_definitions(srd_core PUBLIC
 
 target_link_libraries(srd_core PUBLIC
     ws2_32
+    bcrypt
 )
 
 add_executable(SimpleRemoteHost

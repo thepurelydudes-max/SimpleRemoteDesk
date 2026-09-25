@@ -1,6 +1,7 @@
 #include "viewer/profile_dialog.h"
 
 #include "ui/theme.h"
+#include "ui/dpi.h"
 
 #include <algorithm>
 #include <memory>
@@ -125,13 +126,17 @@ void draw_button(
 void create_controls(DialogState* state)
 {
     HWND hwnd = state->hwnd;
+    const UINT dpi = ui::window_dpi(hwnd);
+    const auto S = [dpi](int value) {
+        return ui::scale_value(value, dpi);
+    };
 
     auto makeEdit = [&](int id, DWORD style) {
         HWND control = ::CreateWindowExW(
             0, L"EDIT", L"",
             WS_CHILD | WS_VISIBLE | WS_TABSTOP |
                 ES_AUTOHSCROLL | style,
-            0, 0, 100, 32,
+            0, 0, S(100), S(32),
             hwnd,
             reinterpret_cast<HMENU>(static_cast<INT_PTR>(id)),
             nullptr,
@@ -149,7 +154,7 @@ void create_controls(DialogState* state)
     state->showPassword = ::CreateWindowExW(
         0, L"BUTTON", L"Показать пароль",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
-        0, 0, 180, 28,
+        0, 0, S(180), S(28),
         hwnd,
         reinterpret_cast<HMENU>(IDC_SHOW_PASSWORD),
         nullptr,
@@ -159,7 +164,7 @@ void create_controls(DialogState* state)
         0, L"BUTTON",
         state->profile->host.empty() ? L"Добавить" : L"Сохранить",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-        0, 0, 144, 42,
+        0, 0, S(144), S(42),
         hwnd,
         reinterpret_cast<HMENU>(IDC_OK),
         nullptr,
@@ -168,7 +173,7 @@ void create_controls(DialogState* state)
     state->cancelButton = ::CreateWindowExW(
         0, L"BUTTON", L"Отмена",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_OWNERDRAW,
-        0, 0, 144, 42,
+        0, 0, S(144), S(42),
         hwnd,
         reinterpret_cast<HMENU>(IDC_CANCEL),
         nullptr,
@@ -207,13 +212,20 @@ void create_controls(DialogState* state)
     ::SetWindowTextW(state->portEdit, std::to_wstring(initial.port).c_str());
     ::SetWindowTextW(state->passwordEdit, widen(initial.password).c_str());
 
-    ::SetWindowPos(state->nameEdit, nullptr, 206, 154, 404, 34, SWP_NOZORDER);
-    ::SetWindowPos(state->hostEdit, nullptr, 206, 214, 404, 34, SWP_NOZORDER);
-    ::SetWindowPos(state->portEdit, nullptr, 206, 274, 170, 34, SWP_NOZORDER);
-    ::SetWindowPos(state->passwordEdit, nullptr, 206, 334, 404, 34, SWP_NOZORDER);
-    ::SetWindowPos(state->showPassword, nullptr, 206, 376, 180, 28, SWP_NOZORDER);
-    ::SetWindowPos(state->cancelButton, nullptr, 310, 446, 144, 42, SWP_NOZORDER);
-    ::SetWindowPos(state->okButton, nullptr, 466, 446, 144, 42, SWP_NOZORDER);
+    const int labelWidth = S(132);
+    const int editLeft = S(190);
+    const int editWidth = S(420);
+    const int editHeight = S(34);
+
+    ::SetWindowPos(state->nameEdit, nullptr, editLeft, S(150), editWidth, editHeight, SWP_NOZORDER);
+    ::SetWindowPos(state->hostEdit, nullptr, editLeft, S(210), editWidth, editHeight, SWP_NOZORDER);
+    ::SetWindowPos(state->portEdit, nullptr, editLeft, S(270), S(180), editHeight, SWP_NOZORDER);
+    ::SetWindowPos(state->passwordEdit, nullptr, editLeft, S(330), editWidth, editHeight, SWP_NOZORDER);
+    ::SetWindowPos(state->showPassword, nullptr, editLeft, S(374), S(190), S(28), SWP_NOZORDER);
+    ::SetWindowPos(state->cancelButton, nullptr, S(302), S(440), S(144), S(42), SWP_NOZORDER);
+    ::SetWindowPos(state->okButton, nullptr, S(466), S(440), S(144), S(42), SWP_NOZORDER);
+
+    (void)labelWidth;
 }
 
 void paint(DialogState* state)
@@ -224,15 +236,20 @@ void paint(DialogState* state)
     RECT client{};
     ::GetClientRect(state->hwnd, &client);
 
+    const UINT dpi = ui::window_dpi(state->hwnd);
+    const auto S = [dpi](int value) {
+        return ui::scale_value(value, dpi);
+    };
+
     ui::fill_rect(dc, client, ui::Bg);
-    ui::fill_rect(dc, RECT{0, 0, client.right, 96}, ui::Header);
+    ui::fill_rect(dc, RECT{0, 0, client.right, S(96)}, ui::Header);
 
     ui::draw_text(
         dc,
         state->profile->host.empty()
             ? L"Добавить компьютер"
             : L"Параметры подключения",
-        RECT{86, 18, 560, 50},
+        RECT{S(72), S(18), client.right - S(32), S(50)},
         ui::Text,
         state->fontTitle,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -240,15 +257,15 @@ void paint(DialogState* state)
     ui::draw_text(
         dc,
         L"Укажите адрес Simple Remote Host и пароль доступа",
-        RECT{87, 52, 620, 78},
+        RECT{S(73), S(52), client.right - S(32), S(78)},
         ui::Muted,
         state->font,
-        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
 
     ui::fill_round_rect(
         dc,
-        RECT{24, 116, 636, 516},
-        18,
+        RECT{S(24), S(116), client.right - S(24), client.bottom - S(24)},
+        S(18),
         ui::Surface,
         ui::BorderSoft);
 
@@ -259,13 +276,13 @@ void paint(DialogState* state)
         L"Пароль"
     };
 
-    const int tops[] = {154, 214, 274, 334};
+    const int tops[] = {150, 210, 270, 330};
 
     for (int i = 0; i < 4; ++i) {
         ui::draw_text(
             dc,
             labels[i],
-            RECT{50, tops[i], 188, tops[i] + 34},
+            RECT{S(50), S(tops[i]), S(176), S(tops[i] + 34)},
             ui::Muted,
             state->font,
             DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -451,7 +468,12 @@ bool edit_profile(
     state.fontTitle = ui::create_font(16, FW_SEMIBOLD);
     state.editBrush = ::CreateSolidBrush(ui::Surface2);
 
-    RECT rect{0, 0, 660, 540};
+    const UINT dpi = ui::system_dpi();
+    RECT rect{
+        0,
+        0,
+        ui::scale_value(660, dpi),
+        ui::scale_value(540, dpi)};
 
     ::AdjustWindowRectEx(
         &rect,

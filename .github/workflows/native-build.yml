@@ -21,3 +21,35 @@ jobs:
 
       - name: Build Release
         run: cmake --build build/native --config Release
+
+      - name: Package Release
+        if: success()
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path dist | Out-Null
+          Copy-Item build/native/src/Release/SimpleRemoteDesk.exe dist/SimpleRemoteDesk.exe
+          Copy-Item build/native/src/Release/SimpleRemoteHostGui.exe dist/SimpleRemoteHostGui.exe
+          Copy-Item build/native/src/Release/SimpleRemoteViewerGui.exe dist/SimpleRemoteViewerGui.exe
+          @"
+          Simple Remote Desk Native x64
+
+          Main program:
+            SimpleRemoteDesk.exe
+
+          Diagnostic standalone programs:
+            SimpleRemoteHostGui.exe
+            SimpleRemoteViewerGui.exe
+
+          The main program starts Host automatically and opens Viewer on normal launch.
+          Use --autostart to start Host in the tray without opening Viewer.
+          Use --settings to open Host settings.
+          "@ | Set-Content -Encoding UTF8 dist/README.txt
+
+      - name: Upload Release Artifact
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleRemoteDesk-Native-x64
+          path: dist/*
+          if-no-files-found: error
+          retention-days: 30

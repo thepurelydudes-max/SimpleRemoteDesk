@@ -22,6 +22,22 @@ jobs:
       - name: Build Release
         run: cmake --build build/native --config Release
 
+      - name: Capture UI Smoke Screenshots
+        if: success()
+        continue-on-error: true
+        shell: pwsh
+        run: ./native/tools/Capture-UiSmoke.ps1
+
+      - name: Upload UI Smoke Screenshots
+        if: always()
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: SimpleRemoteDesk-UI-Smoke
+          path: ui-smoke/*.png
+          if-no-files-found: ignore
+          retention-days: 7
+
       - name: Package Release
         if: success()
         shell: pwsh

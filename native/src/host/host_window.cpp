@@ -34,6 +34,25 @@ RECT make_rect(int l, int t, int r, int b)
     return RECT{l, t, r, b};
 }
 
+std::wstring widen_utf8(const std::string& text)
+{
+    if (text.empty()) return {};
+
+    const int chars = ::MultiByteToWideChar(
+        CP_UTF8, 0,
+        text.data(), static_cast<int>(text.size()),
+        nullptr, 0);
+
+    std::wstring out(static_cast<std::size_t>(chars), L'\0');
+
+    ::MultiByteToWideChar(
+        CP_UTF8, 0,
+        text.data(), static_cast<int>(text.size()),
+        out.data(), chars);
+
+    return out;
+}
+
 std::string narrow_utf8(const std::wstring& text)
 {
     if (text.empty()) return {};
@@ -848,7 +867,7 @@ void HostWindow::sync_controls_from_settings()
     set_text(portEdit_, std::to_wstring(settings_.port));
     set_text(
         passwordEdit_,
-        std::wstring(settings_.password.begin(), settings_.password.end()));
+        widen_utf8(settings_.password));
     set_text(fpsEdit_, std::to_wstring(settings_.fps));
     set_text(
         qualityEdit_,

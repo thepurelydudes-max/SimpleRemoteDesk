@@ -57,6 +57,7 @@ private:
     HFONT fontTitle_{nullptr};
     HFONT fontSection_{nullptr};
     HBRUSH editBrush_{nullptr};
+    HBRUSH listBrush_{nullptr};
 
     std::vector<settings::ConnectionProfile> profiles_;
     std::vector<network::DiscoveredHost> discovered_;

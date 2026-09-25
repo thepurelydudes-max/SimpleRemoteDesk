@@ -1,0 +1,49 @@
+name: Build Native C++
+on:
+  push:
+    branches: [ cpp-port ]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Expand native source
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path cpp | Out-Null
+          Expand-Archive -Path cpp-src.zip -DestinationPath cpp -Force
+
+      - name: Configure
+        shell: pwsh
+        run: cmake -S cpp -B cpp/build -G "Visual Studio 17 2022" -A x64
+
+      - name: Build Release
+        shell: pwsh
+        run: cmake --build cpp/build --config Release --parallel
+
+      - name: Smoke-check EXE
+        shell: pwsh
+        run: |
+          $exe = "cpp/build/Release/SimpleRemoteDesk.exe"
+          if (!(Test-Path $exe)) { throw "EXE was not produced" }
+          Get-Item $exe | Format-List Name,Length,FullName
+
+      - name: Package
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path native-release | Out-Null
+          Copy-Item cpp/build/Release/SimpleRemoteDesk.exe native-release/SimpleRemoteDesk.exe
+          Copy-Item cpp/README_CPP_RU.md native-release/README_CPP_RU.md
+          Compress-Archive -Path native-release/* -DestinationPath SimpleRemoteDesk-Native-x64.zip -Force
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SimpleRemoteDesk-Native-x64
+          path: |
+            native-release/SimpleRemoteDesk.exe
+            native-release/README_CPP_RU.md
+            SimpleRemoteDesk-Native-x64.zip
+          if-no-files-found: error

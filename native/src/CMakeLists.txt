@@ -69,3 +69,12 @@ add_executable(StreamSmokeTest
 target_link_libraries(StreamSmokeTest PRIVATE
     srd_core
 )
+
+
+add_executable(VideoStreamClientTest
+    tools/video_stream_client_test.cpp
+)
+
+target_link_libraries(VideoStreamClientTest PRIVATE
+    srd_core
+)

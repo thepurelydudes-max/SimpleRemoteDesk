@@ -33,4 +33,9 @@ protocol::Message Session::receive()
     return protocol::decode(header, payload);
 }
 
+void Session::close() noexcept
+{
+    socket_.close();
+}
+
 } // namespace srd::core

@@ -252,6 +252,18 @@ HostSettings load_host_settings()
         settings.password = generate_password();
     }
 
+    wchar_t hostIdBuffer[256]{};
+    ::GetPrivateProfileStringW(
+        L"Host", L"HostId", L"", hostIdBuffer,
+        static_cast<DWORD>(std::size(hostIdBuffer)), path.c_str());
+
+    settings.hostId = wide_to_utf8(hostIdBuffer);
+
+    if (settings.hostId.empty()) {
+        const std::string generated = generate_password(24);
+        settings.hostId = generated;
+    }
+
     settings.autostart = autostart_enabled();
     return settings;
 }
@@ -272,6 +284,12 @@ void save_host_settings(const HostSettings& settings)
         L"Host",
         L"Password",
         protect_password(settings.password),
+        path);
+
+    write_text(
+        L"Host",
+        L"HostId",
+        utf8_to_wide(settings.hostId),
         path);
 
     set_autostart(settings.autostart);

@@ -10,6 +10,8 @@
 #include "transfer/file_manifest.h"
 
 #include <array>
+#include <cstring>
+#include <span>
 #include <filesystem>
 #include <fstream>
 #include <memory>

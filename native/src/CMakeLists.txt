@@ -10,6 +10,8 @@ add_library(srd_core STATIC
     input/injector.cpp
     capture/gdi_screen_capture.cpp
     codec/jpeg_wic.cpp
+    video/latest_frame_mailbox.cpp
+    video/screen_producer.cpp
 )
 
 target_include_directories(srd_core PUBLIC

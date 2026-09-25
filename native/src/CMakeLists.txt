@@ -9,6 +9,9 @@ add_library(srd_core STATIC
     input/control_message.cpp
     input/injector.cpp
     control/control_client.cpp
+    audio/audio_channel.cpp
+    audio/wave_player.cpp
+    audio/loopback_capture.cpp
     host/host_service.cpp
     ui/theme.cpp
     settings/settings.cpp
@@ -44,6 +47,8 @@ target_link_libraries(srd_core PUBLIC
     windowscodecs
     d3d11
     dxgi
+    winmm
+    uuid
 )
 
 add_executable(SimpleRemoteHost

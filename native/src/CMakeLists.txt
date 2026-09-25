@@ -12,6 +12,7 @@ add_library(srd_core STATIC
     codec/jpeg_wic.cpp
     video/latest_frame_mailbox.cpp
     video/screen_producer.cpp
+    video/frame_packet.cpp
 )
 
 target_include_directories(srd_core PUBLIC

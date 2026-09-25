@@ -3,6 +3,7 @@
 #include <windows.h>
 
 #include <cstring>
+#include <iterator>
 
 namespace srd::capture {
 

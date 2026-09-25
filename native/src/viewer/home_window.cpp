@@ -429,8 +429,8 @@ void ViewerHomeWindow::layout_controls(HWND hwnd)
         return ui::scale_value(value, dpi);
     };
 
-    const int width = std::max(1, client.right - client.left);
-    const int height = std::max(1, client.bottom - client.top);
+    const int width = std::max(1, static_cast<int>(client.right - client.left));
+    const int height = std::max(1, static_cast<int>(client.bottom - client.top));
 
     const int margin = S(28);
     const int headerHeight = S(104);
@@ -576,7 +576,7 @@ void ViewerHomeWindow::paint(HWND hwnd)
     POINT savedPoint{savedRect.left, savedRect.top};
     ::ScreenToClient(hwnd, &savedPoint);
 
-    const int savedTitleTop = std::max(headerHeight + S(12), savedPoint.y - S(38));
+    const int savedTitleTop = std::max(headerHeight + S(12), static_cast<int>(savedPoint.y) - S(38));
 
     ui::draw_text(
         dc,

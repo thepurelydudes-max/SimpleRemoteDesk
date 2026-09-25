@@ -1,4 +1,5 @@
 #include "viewer/session_runner.h"
+#include "audio/audio_channel.h"
 
 #include "codec/jpeg_wic_decoder.h"
 #include "control/control_client.h"
@@ -37,6 +38,16 @@ int run_live_session(
     DecodedFrameMailbox mailbox;
     LiveViewWindow window(mailbox, &control);
     video::VideoClient client(host, password, 45902);
+    audio::AudioClient audioClient(host, password, 45903);
+
+    std::thread audioThread([&] {
+        try {
+            audioClient.play_forever();
+        }
+        catch (...) {
+            // Audio is optional; screen/control remain active.
+        }
+    });
 
     std::thread videoThread([&] {
         const HRESULT hr = ::CoInitializeEx(nullptr, COINIT_MULTITHREADED);
@@ -62,10 +73,15 @@ int run_live_session(
     const int exitCode = window.run(instance, showCommand);
 
     client.stop();
+    audioClient.stop();
     control.disconnect();
 
     if (videoThread.joinable()) {
         videoThread.join();
+    }
+
+    if (audioThread.joinable()) {
+        audioThread.join();
     }
 
     return exitCode;

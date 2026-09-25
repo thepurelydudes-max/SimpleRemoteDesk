@@ -10,6 +10,7 @@ add_library(srd_core STATIC
     input/injector.cpp
     capture/gdi_screen_capture.cpp
     codec/jpeg_wic.cpp
+    codec/jpeg_wic_decoder.cpp
     video/latest_frame_mailbox.cpp
     video/screen_producer.cpp
     video/frame_packet.cpp
@@ -77,4 +78,15 @@ add_executable(VideoStreamClientTest
 
 target_link_libraries(VideoStreamClientTest PRIVATE
     srd_core
+)
+
+
+add_executable(SimpleRemoteViewerGui WIN32
+    viewer/gui_main.cpp
+    viewer/live_view_window.cpp
+)
+
+target_link_libraries(SimpleRemoteViewerGui PRIVATE
+    srd_core
+    shell32
 )

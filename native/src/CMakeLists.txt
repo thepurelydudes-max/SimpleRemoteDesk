@@ -8,6 +8,8 @@ add_library(srd_core STATIC
     security/secure_session.cpp
     input/control_message.cpp
     input/injector.cpp
+    capture/gdi_screen_capture.cpp
+    codec/jpeg_wic.cpp
 )
 
 target_include_directories(srd_core PUBLIC
@@ -25,6 +27,9 @@ target_link_libraries(srd_core PUBLIC
     ws2_32
     bcrypt
     user32
+    gdi32
+    ole32
+    windowscodecs
 )
 
 add_executable(SimpleRemoteHost

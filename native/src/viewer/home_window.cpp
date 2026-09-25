@@ -1,6 +1,7 @@
 #include "viewer/home_window.h"
 
 #include "ui/theme.h"
+#include "ui/dpi.h"
 #include "viewer/profile_dialog.h"
 
 #include <windowsx.h>
@@ -112,6 +113,8 @@ std::optional<settings::ConnectionProfile> ViewerHomeWindow::run(
         return std::nullopt;
     }
 
+    const UINT dpi = ui::system_dpi();
+
     hwnd_ = ::CreateWindowExW(
         0,
         kClassName,
@@ -119,8 +122,8 @@ std::optional<settings::ConnectionProfile> ViewerHomeWindow::run(
         WS_OVERLAPPEDWINDOW,
         CW_USEDEFAULT,
         CW_USEDEFAULT,
-        1180,
-        760,
+        ui::scale_value(1180, dpi),
+        ui::scale_value(760, dpi),
         nullptr,
         nullptr,
         instance,
@@ -211,6 +214,14 @@ LRESULT ViewerHomeWindow::handle_message(
     case WM_SIZE:
         layout_controls(hwnd);
         return 0;
+
+    case WM_GETMINMAXINFO: {
+        auto* info = reinterpret_cast<MINMAXINFO*>(lParam);
+        const UINT dpi = ui::window_dpi(hwnd);
+        info->ptMinTrackSize.x = ui::scale_value(900, dpi);
+        info->ptMinTrackSize.y = ui::scale_value(650, dpi);
+        return 0;
+    }
 
     case WM_SRD_DISCOVERED: {
         std::unique_ptr<network::DiscoveredHost> host(
@@ -304,9 +315,15 @@ LRESULT ViewerHomeWindow::handle_message(
         return reinterpret_cast<LRESULT>(editBrush_);
     }
 
-    case WM_CTLCOLORSTATIC:
-    case WM_CTLCOLORBTN:
     case WM_CTLCOLORLISTBOX: {
+        HDC dc = reinterpret_cast<HDC>(wParam);
+        ::SetTextColor(dc, ui::Text);
+        ::SetBkColor(dc, ui::Bg);
+        return reinterpret_cast<LRESULT>(::GetStockObject(BLACK_BRUSH));
+    }
+
+    case WM_CTLCOLORSTATIC:
+    case WM_CTLCOLORBTN: {
         HDC dc = reinterpret_cast<HDC>(wParam);
         ::SetTextColor(dc, ui::Text);
         ::SetBkColor(dc, ui::Bg);
@@ -346,7 +363,7 @@ void ViewerHomeWindow::create_controls(HWND hwnd)
     ::SendMessageW(searchEdit_, EM_SETCUEBANNER, TRUE, reinterpret_cast<LPARAM>(L"Поиск компьютеров"));
 
     savedList_ = ::CreateWindowExW(
-        WS_EX_CLIENTEDGE,
+        0,
         L"LISTBOX",
         L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP |
@@ -359,7 +376,7 @@ void ViewerHomeWindow::create_controls(HWND hwnd)
         nullptr);
 
     discoveredList_ = ::CreateWindowExW(
-        WS_EX_CLIENTEDGE,
+        0,
         L"LISTBOX",
         L"",
         WS_CHILD | WS_VISIBLE | WS_TABSTOP |
@@ -405,18 +422,114 @@ void ViewerHomeWindow::layout_controls(HWND hwnd)
     RECT client{};
     ::GetClientRect(hwnd, &client);
 
-    const int width = client.right - client.left;
-    const int contentWidth = std::max(700, width - 64);
+    const UINT dpi = ui::window_dpi(hwnd);
+    const auto S = [dpi](int value) {
+        return ui::scale_value(value, dpi);
+    };
 
-    ::SetWindowPos(searchEdit_, nullptr, width - 556, 34, 250, 42, SWP_NOZORDER);
-    ::SetWindowPos(addButton_, nullptr, width - 288, 34, 224, 42, SWP_NOZORDER);
+    const int width = std::max(1, client.right - client.left);
+    const int height = std::max(1, client.bottom - client.top);
 
-    ::SetWindowPos(savedList_, nullptr, 32, 180, contentWidth, 202, SWP_NOZORDER);
-    ::SetWindowPos(discoveredList_, nullptr, 32, 470, contentWidth, 202, SWP_NOZORDER);
+    const int margin = S(28);
+    const int headerHeight = S(104);
+    const int toolbarTop = S(30);
+    const int toolbarHeight = S(40);
+    const int searchWidth = S(260);
+    const int addWidth = S(220);
+    const int toolbarGap = S(16);
 
-    ::SetWindowPos(editButton_, nullptr, 32, 394, 132, 42, SWP_NOZORDER);
-    ::SetWindowPos(deleteButton_, nullptr, 174, 394, 132, 42, SWP_NOZORDER);
-    ::SetWindowPos(connectButton_, nullptr, width - 224, 394, 192, 42, SWP_NOZORDER);
+    const int addLeft = width - margin - addWidth;
+    const int searchLeft = addLeft - toolbarGap - searchWidth;
+
+    ::SetWindowPos(
+        searchEdit_, nullptr,
+        std::max(margin, searchLeft),
+        toolbarTop,
+        searchWidth,
+        toolbarHeight,
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        addButton_, nullptr,
+        std::max(margin, addLeft),
+        toolbarTop,
+        addWidth,
+        toolbarHeight,
+        SWP_NOZORDER);
+
+    const int sectionTitleHeight = S(30);
+    const int contentTop = headerHeight + S(24);
+    const int savedTitleTop = contentTop;
+    const int savedListTop = savedTitleTop + sectionTitleHeight + S(8);
+
+    const int actionsHeight = S(42);
+    const int actionsGap = S(12);
+    const int betweenSections = S(20);
+    const int discoveredTitleHeight = S(30);
+    const int bottomMargin = S(24);
+
+    const int fixedVertical =
+        savedListTop +
+        actionsGap + actionsHeight +
+        betweenSections + discoveredTitleHeight + S(8) +
+        bottomMargin;
+
+    int remainingForLists = height - fixedVertical;
+    remainingForLists = std::max(remainingForLists, S(260));
+
+    const int savedListHeight = std::max(S(130), remainingForLists * 46 / 100);
+    const int actionTop = savedListTop + savedListHeight + actionsGap;
+    const int discoveredTitleTop = actionTop + actionsHeight + betweenSections;
+    const int discoveredListTop =
+        discoveredTitleTop + discoveredTitleHeight + S(8);
+
+    const int discoveredListHeight =
+        std::max(S(130), height - bottomMargin - discoveredListTop);
+
+    const int contentWidth = std::max(S(600), width - margin * 2);
+
+    ::SetWindowPos(
+        savedList_, nullptr,
+        margin,
+        savedListTop,
+        contentWidth,
+        savedListHeight,
+        SWP_NOZORDER);
+
+    const int smallButtonWidth = S(132);
+    const int connectWidth = S(192);
+
+    ::SetWindowPos(
+        editButton_, nullptr,
+        margin,
+        actionTop,
+        smallButtonWidth,
+        actionsHeight,
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        deleteButton_, nullptr,
+        margin + smallButtonWidth + S(10),
+        actionTop,
+        smallButtonWidth,
+        actionsHeight,
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        connectButton_, nullptr,
+        width - margin - connectWidth,
+        actionTop,
+        connectWidth,
+        actionsHeight,
+        SWP_NOZORDER);
+
+    ::SetWindowPos(
+        discoveredList_, nullptr,
+        margin,
+        discoveredListTop,
+        contentWidth,
+        discoveredListHeight,
+        SWP_NOZORDER);
 }
 
 void ViewerHomeWindow::paint(HWND hwnd)
@@ -427,13 +540,23 @@ void ViewerHomeWindow::paint(HWND hwnd)
     RECT client{};
     ::GetClientRect(hwnd, &client);
 
+    const UINT dpi = ui::window_dpi(hwnd);
+    const auto S = [dpi](int value) {
+        return ui::scale_value(value, dpi);
+    };
+
+    const int width = client.right - client.left;
+    const int height = client.bottom - client.top;
+    const int margin = S(28);
+    const int headerHeight = S(104);
+
     ui::fill_rect(dc, client, ui::Bg);
-    ui::fill_rect(dc, RECT{0, 0, client.right, 112}, ui::Header);
+    ui::fill_rect(dc, RECT{0, 0, width, headerHeight}, ui::Header);
 
     ui::draw_text(
         dc,
         L"Simple Remote Viewer",
-        RECT{98, 22, 520, 54},
+        RECT{S(84), S(20), std::min(width - margin, S(560)), S(52)},
         ui::Text,
         fontTitle_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -441,23 +564,37 @@ void ViewerHomeWindow::paint(HWND hwnd)
     ui::draw_text(
         dc,
         L"Удалённый доступ к вашим компьютерам",
-        RECT{99, 56, 560, 82},
+        RECT{S(85), S(54), std::min(width - margin, S(580)), S(82)},
         ui::Muted,
         font_,
-        DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+        DT_LEFT | DT_VCENTER | DT_SINGLELINE | DT_END_ELLIPSIS);
+
+    RECT savedRect{};
+    ::GetWindowRect(savedList_, &savedRect);
+    POINT savedPoint{savedRect.left, savedRect.top};
+    ::ScreenToClient(hwnd, &savedPoint);
+
+    const int savedTitleTop = std::max(headerHeight + S(12), savedPoint.y - S(38));
 
     ui::draw_text(
         dc,
         L"Мои компьютеры",
-        RECT{32, 132, 400, 166},
+        RECT{margin, savedTitleTop, width - margin, savedTitleTop + S(30)},
         ui::Text,
         fontSection_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
 
+    RECT discoveredRect{};
+    ::GetWindowRect(discoveredList_, &discoveredRect);
+    POINT discoveredPoint{discoveredRect.left, discoveredRect.top};
+    ::ScreenToClient(hwnd, &discoveredPoint);
+
+    const int discoveredTitleTop = discoveredPoint.y - S(38);
+
     ui::draw_text(
         dc,
         L"Доступные в сети",
-        RECT{32, 438, 400, 466},
+        RECT{margin, discoveredTitleTop, width - margin, discoveredTitleTop + S(30)},
         ui::Text,
         fontSection_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
@@ -465,10 +602,37 @@ void ViewerHomeWindow::paint(HWND hwnd)
     ui::draw_text(
         dc,
         L"Локальная сеть и VPN",
-        RECT{240, 438, 520, 466},
+        RECT{margin + S(190), discoveredTitleTop, width - margin, discoveredTitleTop + S(30)},
         ui::Muted,
         font_,
         DT_LEFT | DT_VCENTER | DT_SINGLELINE);
+
+    // Soft borders around list areas, without bright system client edges.
+    RECT savedClient{};
+    ::GetWindowRect(savedList_, &savedClient);
+    POINT savedTL{savedClient.left, savedClient.top};
+    POINT savedBR{savedClient.right, savedClient.bottom};
+    ::ScreenToClient(hwnd, &savedTL);
+    ::ScreenToClient(hwnd, &savedBR);
+    ui::fill_round_rect(
+        dc,
+        RECT{savedTL.x - S(1), savedTL.y - S(1), savedBR.x + S(1), savedBR.y + S(1)},
+        S(8),
+        ui::Bg,
+        ui::BorderSoft);
+
+    RECT discClient{};
+    ::GetWindowRect(discoveredList_, &discClient);
+    POINT discTL{discClient.left, discClient.top};
+    POINT discBR{discClient.right, discClient.bottom};
+    ::ScreenToClient(hwnd, &discTL);
+    ::ScreenToClient(hwnd, &discBR);
+    ui::fill_round_rect(
+        dc,
+        RECT{discTL.x - S(1), discTL.y - S(1), discBR.x + S(1), discBR.y + S(1)},
+        S(8),
+        ui::Bg,
+        ui::BorderSoft);
 
     ::EndPaint(hwnd, &ps);
 }

@@ -28,6 +28,9 @@ enum class MessageType : std::uint8_t {
     MouseWheel = 22,
     Key = 23,
     Disconnect = 24,
+
+    SnapshotRequest = 30,
+    ScreenFrame = 31,
 };
 
 struct Message {

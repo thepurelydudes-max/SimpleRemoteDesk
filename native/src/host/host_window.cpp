@@ -463,8 +463,8 @@ void HostWindow::layout_controls(HWND hwnd)
         return ui::scale_value(value, dpi);
     };
 
-    const int width = std::max(1, client.right - client.left);
-    const int height = std::max(1, client.bottom - client.top);
+    const int width = std::max(1, static_cast<int>(client.right - client.left));
+    const int height = std::max(1, static_cast<int>(client.bottom - client.top));
 
     const int margin = S(24);
     const int gap = S(20);
@@ -646,7 +646,7 @@ void HostWindow::paint(HWND hwnd)
     const RECT qualityCard{
         cardLeft, qualityTop, cardRight, qualityTop + qualityHeight};
     const RECT statusCard{
-        cardLeft, statusTop, cardRight, std::max(statusTop + S(140), statusBottom)};
+        cardLeft, statusTop, cardRight, std::max(statusTop + S(140), static_cast<int>(statusBottom))};
 
     ui::fill_round_rect(dc, accessCard, S(18), ui::Surface, ui::BorderSoft);
     ui::fill_round_rect(dc, qualityCard, S(18), ui::Surface, ui::BorderSoft);

@@ -1,6 +1,7 @@
 #include "viewer/live_view_window.h"
 
 #include "control/control_client.h"
+#include <windowsx.h>
 
 #include <algorithm>
 #include <memory>
@@ -368,7 +369,7 @@ void LiveViewWindow::toggle_fullscreen(HWND hwnd)
 void LiveViewWindow::release_pressed_keys() noexcept
 {
     if (!control_ || !control_->connected()) {
-        std::fill(std::begin(pressedKeys_), std::end(pressedKeys_), false);
+        for (bool& pressed : pressedKeys_) pressed = false;
         return;
     }
 

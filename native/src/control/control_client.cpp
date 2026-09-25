@@ -48,7 +48,7 @@ void ControlClient::connect()
         return;
     }
 
-    net::SocketRuntime sockets;
+    auto runtime = std::make_unique<net::SocketRuntime>();
     auto socket = net::TcpSocket::connect_to(host_, port_);
 
     auto transport = std::make_unique<core::Session>(std::move(socket));
@@ -66,6 +66,7 @@ void ControlClient::connect()
         *transport,
         std::move(keys));
 
+    socketRuntime_ = std::move(runtime);
     transport_ = std::move(transport);
     secure_ = std::move(secure);
     connected_.store(true, std::memory_order_release);
@@ -91,6 +92,7 @@ void ControlClient::disconnect() noexcept
 
     secure_.reset();
     transport_.reset();
+    socketRuntime_.reset();
 }
 
 bool ControlClient::connected() const noexcept
@@ -116,6 +118,7 @@ void ControlClient::send(
         if (transport_) transport_->close();
         secure_.reset();
         transport_.reset();
+        socketRuntime_.reset();
         throw;
     }
 }

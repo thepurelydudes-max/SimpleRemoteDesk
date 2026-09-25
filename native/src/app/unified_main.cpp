@@ -130,7 +130,9 @@ public:
         }
 
         MSG msg{};
-        while (::GetMessageW(&msg, nullptr, 0, 0) > 0) {
+        while (!exiting_) {
+            const BOOL result = ::GetMessageW(&msg, nullptr, 0, 0);
+            if (result <= 0) break;
             ::TranslateMessage(&msg);
             ::DispatchMessageW(&msg);
         }
@@ -223,6 +225,7 @@ private:
             break;
 
         case WM_DESTROY:
+            exiting_ = true;
             remove_tray();
             service_.stop();
             hwnd_ = nullptr;
@@ -345,6 +348,7 @@ private:
     bool trayAdded_{false};
     bool viewerOpen_{false};
     bool settingsOpen_{false};
+    bool exiting_{false};
 };
 
 }

@@ -7,6 +7,7 @@
 #include <thread>
 
 namespace srd::core { class Session; }
+namespace srd::security { class SecureSession; }
 
 namespace srd::transfer {
 
@@ -20,8 +21,8 @@ public:
 
 private:
     void run();
-    void send_clipboard(class srd::security::SecureSession& secure);
-    void receive_clipboard(class srd::security::SecureSession& secure);
+    void send_clipboard(security::SecureSession& secure);
+    void receive_clipboard(security::SecureSession& secure);
 
     std::string password_;
     std::uint16_t port_;

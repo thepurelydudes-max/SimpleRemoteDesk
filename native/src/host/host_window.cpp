@@ -21,6 +21,7 @@ enum : int {
     IDC_FPS,
     IDC_QUALITY,
     IDC_SHOW_PASSWORD,
+    IDC_AUDIO,
     IDC_AUTOSTART,
     IDC_START,
     IDC_DISCONNECT,
@@ -342,6 +343,17 @@ void HostWindow::create_controls(HWND hwnd)
         nullptr,
         nullptr);
 
+    audioEnabled_ = ::CreateWindowExW(
+        0,
+        L"BUTTON",
+        L"Передавать системный звук",
+        WS_CHILD | WS_VISIBLE | WS_TABSTOP | BS_AUTOCHECKBOX,
+        0, 0, 320, 30,
+        hwnd,
+        reinterpret_cast<HMENU>(IDC_AUDIO),
+        nullptr,
+        nullptr);
+
     autostart_ = ::CreateWindowExW(
         0,
         L"BUTTON",
@@ -388,6 +400,7 @@ void HostWindow::create_controls(HWND hwnd)
 
     for (HWND control : {
         showPassword_,
+        audioEnabled_,
         autostart_,
         startButton_,
         disconnectButton_,
@@ -413,7 +426,8 @@ void HostWindow::layout_controls(HWND)
 
     ::SetWindowPos(fpsEdit_, nullptr, 62, 486, 380, 34, SWP_NOZORDER);
     ::SetWindowPos(qualityEdit_, nullptr, 572, 486, 420, 34, SWP_NOZORDER);
-    ::SetWindowPos(autostart_, nullptr, 62, 548, 600, 30, SWP_NOZORDER);
+    ::SetWindowPos(audioEnabled_, nullptr, 62, 540, 360, 30, SWP_NOZORDER);
+    ::SetWindowPos(autostart_, nullptr, 62, 575, 600, 30, SWP_NOZORDER);
 
     ::SetWindowPos(startButton_, nullptr, 602, 755, 190, 42, SWP_NOZORDER);
     ::SetWindowPos(disconnectButton_, nullptr, 802, 755, 190, 42, SWP_NOZORDER);
@@ -550,6 +564,7 @@ void HostWindow::paint(HWND hwnd)
     std::wstring details =
         L"Порт: " + std::to_wstring(settings_.port) +
         L"   •   Видео: " + std::to_wstring(settings_.port + 2) +
+        L"   •   Звук: " + (settings_.audioEnabled ? L"включён" : L"выключен") +
         L"   •   Клиент: " + (connected ? L"подключён" : L"нет подключений");
 
     ui::draw_text(
@@ -621,6 +636,7 @@ void HostWindow::toggle_server()
         config.jpegQuality =
             static_cast<float>(settings_.jpegQuality) / 100.0f;
         config.hostId = settings_.hostId;
+        config.audioEnabled = settings_.audioEnabled;
 
         service_.start(std::move(config));
     }
@@ -654,6 +670,12 @@ void HostWindow::sync_controls_from_settings()
         std::to_wstring(settings_.jpegQuality));
 
     ::SendMessageW(
+        audioEnabled_,
+        BM_SETCHECK,
+        settings_.audioEnabled ? BST_CHECKED : BST_UNCHECKED,
+        0);
+
+    ::SendMessageW(
         autostart_,
         BM_SETCHECK,
         settings_.autostart ? BST_CHECKED : BST_UNCHECKED,
@@ -677,6 +699,9 @@ void HostWindow::read_settings_from_controls()
     if (settings_.password.size() < 6) {
         throw std::runtime_error("Пароль должен содержать минимум 6 символов.");
     }
+
+    settings_.audioEnabled =
+        ::SendMessageW(audioEnabled_, BM_GETCHECK, 0, 0) == BST_CHECKED;
 
     settings_.autostart =
         ::SendMessageW(autostart_, BM_GETCHECK, 0, 0) == BST_CHECKED;

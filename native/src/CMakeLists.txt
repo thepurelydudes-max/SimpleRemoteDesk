@@ -104,6 +104,7 @@ add_executable(SimpleRemoteViewerGui WIN32
     viewer/session_runner.cpp
     viewer/home_window.cpp
     viewer/profile_dialog.cpp
+    viewer/viewer_app.cpp
 )
 
 target_link_libraries(SimpleRemoteViewerGui PRIVATE
@@ -126,4 +127,24 @@ target_link_libraries(SimpleRemoteHostGui PRIVATE
     crypt32
     advapi32
     dwmapi
+)
+
+
+add_executable(SimpleRemoteDesk WIN32
+    app/unified_main.cpp
+    host/host_window.cpp
+    viewer/live_view_window.cpp
+    viewer/session_runner.cpp
+    viewer/home_window.cpp
+    viewer/profile_dialog.cpp
+    viewer/viewer_app.cpp
+)
+
+target_link_libraries(SimpleRemoteDesk PRIVATE
+    srd_core
+    shell32
+    crypt32
+    advapi32
+    dwmapi
+    comctl32
 )

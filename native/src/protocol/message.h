@@ -17,6 +17,11 @@ enum class MessageType : std::uint8_t {
     HelloAck = 2,
     Ping = 3,
     Pong = 4,
+
+    AuthChallenge = 10,
+    AuthResponse = 11,
+    AuthOk = 12,
+    SecureEnvelope = 13,
 };
 
 struct Message {

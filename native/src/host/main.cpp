@@ -1,3 +1,4 @@
+#include "capture/screen_capture.h"
 #include "core/session.h"
 #include "core/socket_runtime.h"
 #include "core/tcp_socket.h"

@@ -1,11 +1,14 @@
 #include "core/session.h"
 #include "core/socket_runtime.h"
 #include "core/tcp_socket.h"
+#include "input/control_message.h"
 #include "security/auth.h"
 #include "security/secure_session.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <iostream>
+#include <sstream>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -31,6 +34,28 @@ std::string as_string(const std::vector<std::byte>& bytes)
     };
 }
 
+void print_help()
+{
+    std::cout
+        << "Commands:\n"
+        << "  move X Y\n"
+        << "  ldown | lup | rdown | rup | mdown | mup\n"
+        << "  wheel DELTA\n"
+        << "  keydown VK\n"
+        << "  keyup VK\n"
+        << "  ping\n"
+        << "  quit\n";
+}
+
+void send_button(
+    srd::security::SecureSession& secure,
+    srd::input::MouseButton button,
+    bool down)
+{
+    auto payload = srd::input::encode_mouse_button({button, down});
+    secure.send(srd::protocol::MessageType::MouseButton, payload);
+}
+
 }
 
 int main(int argc, char** argv)
@@ -43,7 +68,7 @@ int main(int argc, char** argv)
         auto socket = srd::net::TcpSocket::connect_to(host, 45900);
         srd::core::Session transport(std::move(socket));
 
-        constexpr std::string_view helloText = "SimpleRemoteViewer/native/M1";
+        constexpr std::string_view helloText = "SimpleRemoteViewer/native/M2";
         transport.send(srd::protocol::MessageType::Hello, as_bytes(helloText));
 
         auto ack = transport.receive();
@@ -57,14 +82,85 @@ int main(int argc, char** argv)
         auto keys = srd::security::authenticate_client(transport, password);
         srd::security::SecureSession secure(transport, std::move(keys));
 
-        secure.send(srd::protocol::MessageType::Ping);
-        auto pong = secure.receive();
+        std::cout << "Authentication OK. Encrypted remote input ready.\n";
+        print_help();
 
-        if (pong.type != srd::protocol::MessageType::Pong) {
-            throw std::runtime_error("expected encrypted Pong");
+        std::string line;
+        while (std::cout << "> " && std::getline(std::cin, line)) {
+            std::istringstream input(line);
+            std::string command;
+            input >> command;
+
+            if (command.empty()) continue;
+
+            if (command == "move") {
+                std::int32_t x = 0;
+                std::int32_t y = 0;
+                if (!(input >> x >> y)) {
+                    std::cout << "usage: move X Y\n";
+                    continue;
+                }
+
+                auto payload = srd::input::encode_mouse_move({x, y});
+                secure.send(srd::protocol::MessageType::MouseMove, payload);
+            }
+            else if (command == "ldown") {
+                send_button(secure, srd::input::MouseButton::Left, true);
+            }
+            else if (command == "lup") {
+                send_button(secure, srd::input::MouseButton::Left, false);
+            }
+            else if (command == "rdown") {
+                send_button(secure, srd::input::MouseButton::Right, true);
+            }
+            else if (command == "rup") {
+                send_button(secure, srd::input::MouseButton::Right, false);
+            }
+            else if (command == "mdown") {
+                send_button(secure, srd::input::MouseButton::Middle, true);
+            }
+            else if (command == "mup") {
+                send_button(secure, srd::input::MouseButton::Middle, false);
+            }
+            else if (command == "wheel") {
+                std::int32_t delta = 0;
+                if (!(input >> delta)) {
+                    std::cout << "usage: wheel DELTA\n";
+                    continue;
+                }
+
+                auto payload = srd::input::encode_mouse_wheel({delta});
+                secure.send(srd::protocol::MessageType::MouseWheel, payload);
+            }
+            else if (command == "keydown" || command == "keyup") {
+                unsigned int vk = 0;
+                if (!(input >> vk) || vk > 0xffffu) {
+                    std::cout << "usage: " << command << " VK\n";
+                    continue;
+                }
+
+                auto payload = srd::input::encode_key({
+                    static_cast<std::uint16_t>(vk),
+                    command == "keydown"
+                });
+                secure.send(srd::protocol::MessageType::Key, payload);
+            }
+            else if (command == "ping") {
+                secure.send(srd::protocol::MessageType::Ping);
+                auto pong = secure.receive();
+                std::cout << (pong.type == srd::protocol::MessageType::Pong
+                    ? "pong\n"
+                    : "unexpected reply\n");
+            }
+            else if (command == "quit") {
+                secure.send(srd::protocol::MessageType::Disconnect);
+                break;
+            }
+            else {
+                print_help();
+            }
         }
 
-        std::cout << "Authentication OK. Encrypted Ping/Pong OK.\n";
         return 0;
     }
     catch (const std::exception& ex) {

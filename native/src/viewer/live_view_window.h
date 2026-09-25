@@ -3,11 +3,14 @@
 #include "viewer/frame_mailbox.h"
 
 #include <windows.h>
+#include <atomic>
+#include <thread>
 #include <cstdint>
 
 namespace srd::control {
 class ControlClient;
 }
+namespace srd::transfer { class FileClient; }
 
 namespace srd::viewer {
 
@@ -15,7 +18,9 @@ class LiveViewWindow {
 public:
     LiveViewWindow(
         DecodedFrameMailbox& mailbox,
-        control::ControlClient* control = nullptr);
+        control::ControlClient* control = nullptr,
+        transfer::FileClient* files = nullptr);
+    ~LiveViewWindow();
 
     int run(HINSTANCE instance, int showCommand);
     void notify_frame() const noexcept;
@@ -39,9 +44,13 @@ private:
     bool map_to_remote(LPARAM lParam, std::int32_t& x, std::int32_t& y) const;
     void toggle_fullscreen(HWND hwnd);
     void release_pressed_keys() noexcept;
+    void start_remote_copy_files();
+    void start_remote_paste_files();
+    void join_file_task() noexcept;
 
     DecodedFrameMailbox& mailbox_;
     control::ControlClient* control_{nullptr};
+    transfer::FileClient* files_{nullptr};
     HWND hwnd_{nullptr};
 
     bool fullscreen_{false};
@@ -51,6 +60,8 @@ private:
 
     ULONGLONG lastMouseSend_{0};
     bool pressedKeys_[256]{};
+    std::atomic<bool> fileBusy_{false};
+    std::thread fileThread_;
 };
 
 } // namespace srd::viewer

@@ -15,6 +15,7 @@ add_library(srd_core STATIC
     settings/profiles.cpp
     network/discovery.cpp
     capture/gdi_screen_capture.cpp
+    capture/dxgi_screen_capture.cpp
     codec/jpeg_wic.cpp
     codec/jpeg_wic_decoder.cpp
     video/latest_frame_mailbox.cpp
@@ -41,6 +42,8 @@ target_link_libraries(srd_core PUBLIC
     gdi32
     ole32
     windowscodecs
+    d3d11
+    dxgi
 )
 
 add_executable(SimpleRemoteHost

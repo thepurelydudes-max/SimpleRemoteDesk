@@ -12,6 +12,8 @@ add_library(srd_core STATIC
     host/host_service.cpp
     ui/theme.cpp
     settings/settings.cpp
+    settings/profiles.cpp
+    network/discovery.cpp
     capture/gdi_screen_capture.cpp
     codec/jpeg_wic.cpp
     codec/jpeg_wic_decoder.cpp

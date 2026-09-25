@@ -1,4 +1,5 @@
 #include "viewer/session_runner.h"
+#include "ui/dpi.h"
 #include "viewer/viewer_app.h"
 
 #include <windows.h>
@@ -33,6 +34,8 @@ int WINAPI wWinMain(
     PWSTR,
     int showCommand)
 {
+    srd::ui::enable_dpi_awareness();
+
     int argc = 0;
     LPWSTR* argv = ::CommandLineToArgvW(::GetCommandLineW(), &argc);
 

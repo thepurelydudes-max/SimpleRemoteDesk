@@ -1,5 +1,5 @@
-#include "viewer/home_window.h"
 #include "viewer/session_runner.h"
+#include "viewer/viewer_app.h"
 
 #include <windows.h>
 #include <shellapi.h>
@@ -51,29 +51,6 @@ int WINAPI wWinMain(
 
     if (argv) ::LocalFree(argv);
 
-    for (;;) {
-        srd::viewer::ViewerHomeWindow home;
-        auto selected = home.run(instance, showCommand);
-
-        if (!selected) {
-            return 0;
-        }
-
-        if (selected->password.size() < 6) {
-            ::MessageBoxW(
-                nullptr,
-                L"Для выбранного компьютера не сохранён корректный пароль.",
-                L"Simple Remote Viewer",
-                MB_OK | MB_ICONINFORMATION);
-            continue;
-        }
-
-        srd::viewer::run_live_session(
-            instance,
-            selected->host,
-            selected->password,
-            SW_SHOW);
-
-        showCommand = SW_SHOW;
-    }
+    srd::viewer::run_viewer_app(instance, showCommand);
+    return 0;
 }

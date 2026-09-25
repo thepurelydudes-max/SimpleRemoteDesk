@@ -1,17 +1,37 @@
-add_executable(SimpleRemoteDeskNative WIN32
-    app/main.cpp
+add_library(srd_core STATIC
+    core/socket_runtime.cpp
+    core/tcp_socket.cpp
+    core/session.cpp
+    protocol/message.cpp
 )
 
-target_compile_definitions(SimpleRemoteDeskNative PRIVATE
+target_include_directories(srd_core PUBLIC
+    ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+target_compile_definitions(srd_core PUBLIC
     UNICODE
     _UNICODE
     WIN32_LEAN_AND_MEAN
     NOMINMAX
 )
 
-target_link_libraries(SimpleRemoteDeskNative PRIVATE
-    user32
-    gdi32
-    shell32
-    ole32
+target_link_libraries(srd_core PUBLIC
+    ws2_32
+)
+
+add_executable(SimpleRemoteHost
+    host/main.cpp
+)
+
+target_link_libraries(SimpleRemoteHost PRIVATE
+    srd_core
+)
+
+add_executable(SimpleRemoteViewer
+    viewer/main.cpp
+)
+
+target_link_libraries(SimpleRemoteViewer PRIVATE
+    srd_core
 )

@@ -12,6 +12,7 @@
 #include "security/secure_session.h"
 #include "video/screen_producer.h"
 #include "video/video_channel.h"
+#include "transfer/file_channel.h"
 
 #include <cstddef>
 #include <span>
@@ -148,6 +149,11 @@ void HostService::start(HostConfig config)
             audioServer_->start();
         }
 
+        fileServer_ = std::make_unique<transfer::FileServer>(
+            config_.password,
+            static_cast<std::uint16_t>(config_.port + 4));
+        fileServer_->start();
+
         controlThread_ = std::thread(
             &HostService::control_server_loop,
             this);
@@ -183,6 +189,10 @@ void HostService::stop() noexcept
         }
     }
 
+    if (fileServer_) {
+        fileServer_->stop();
+    }
+
     if (audioServer_) {
         audioServer_->stop();
     }
@@ -207,6 +217,7 @@ void HostService::stop() noexcept
         controlThread_.join();
     }
 
+    fileServer_.reset();
     audioServer_.reset();
     discoveryBeacon_.reset();
     videoServer_.reset();

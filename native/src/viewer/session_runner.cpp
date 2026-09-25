@@ -4,6 +4,7 @@
 #include "codec/jpeg_wic_decoder.h"
 #include "control/control_client.h"
 #include "video/video_channel.h"
+#include "transfer/file_channel.h"
 #include "viewer/frame_mailbox.h"
 #include "viewer/live_view_window.h"
 
@@ -35,8 +36,10 @@ int run_live_session(
         return 2;
     }
 
+    transfer::FileClient fileClient(host, password, 45904);
+
     DecodedFrameMailbox mailbox;
-    LiveViewWindow window(mailbox, &control);
+    LiveViewWindow window(mailbox, &control, &fileClient);
     video::VideoClient client(host, password, 45902);
     audio::AudioClient audioClient(host, password, 45903);
 

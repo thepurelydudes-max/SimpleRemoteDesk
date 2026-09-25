@@ -6,6 +6,7 @@
 #include "security/auth.h"
 
 #include <cstddef>
+#include <iterator>
 #include <span>
 #include <stdexcept>
 #include <string_view>

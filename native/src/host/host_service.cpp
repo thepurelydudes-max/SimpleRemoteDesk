@@ -153,6 +153,13 @@ void HostService::stop() noexcept
 
     clientConnected_.store(false, std::memory_order_release);
 
+    {
+        std::lock_guard lock(stateMutex_);
+        if (activeControlSession_) {
+            activeControlSession_->close();
+        }
+    }
+
     if (wasRunning && socketRuntime_) {
         try {
             auto wake = net::TcpSocket::connect_to("127.0.0.1", config_.port);
@@ -186,6 +193,14 @@ void HostService::stop() noexcept
     set_status(L"Host остановлен");
 }
 
+void HostService::disconnect_client() noexcept
+{
+    std::lock_guard lock(stateMutex_);
+    if (activeControlSession_) {
+        activeControlSession_->close();
+    }
+}
+
 bool HostService::running() const noexcept
 {
     return running_.load(std::memory_order_acquire);
@@ -211,6 +226,16 @@ void HostService::control_server_loop()
             try {
                 core::Session transport(std::move(socket));
 
+                {
+                    std::lock_guard lock(stateMutex_);
+                    activeControlSession_ = &transport;
+                }
+
+                auto clearActiveSession = [this]() {
+                    std::lock_guard lock(stateMutex_);
+                    activeControlSession_ = nullptr;
+                };
+
                 auto hello = transport.receive();
                 if (hello.type != protocol::MessageType::Hello) {
                     continue;
@@ -232,6 +257,7 @@ void HostService::control_server_loop()
 
                 run_control_session(secure, running_);
 
+                clearActiveSession();
                 clientConnected_.store(false, std::memory_order_release);
 
                 if (running_.load(std::memory_order_acquire)) {
@@ -239,6 +265,10 @@ void HostService::control_server_loop()
                 }
             }
             catch (...) {
+                {
+                    std::lock_guard lock(stateMutex_);
+                    activeControlSession_ = nullptr;
+                }
                 clientConnected_.store(false, std::memory_order_release);
 
                 if (running_.load(std::memory_order_acquire)) {

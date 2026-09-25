@@ -34,6 +34,13 @@ enum class MessageType : std::uint8_t {
 
     AudioFormat = 40,
     AudioData = 41,
+
+    FileGet = 50,
+    FilePut = 51,
+    FileManifest = 52,
+    FileChunk = 53,
+    FileEnd = 54,
+    FileAck = 55,
 };
 
 struct Message {

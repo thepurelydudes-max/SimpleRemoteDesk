@@ -1,0 +1,8 @@
+﻿Simple Remote Desk 2.10.4
+
+- Structured portable build.
+- Root contains a small SimpleRemoteDesk.exe and Runtime folder.
+- .NET 8 Desktop Runtime / WinForms / NAudio / app dependencies stay inside Runtime.
+- Target computers do not need .NET installed.
+- Host + Viewer remain one process.
+- No functionality/UI changes from the current 2.10.x source.

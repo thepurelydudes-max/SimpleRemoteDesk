@@ -1,0 +1,13 @@
+Simple Remote Desk v2.10
+
+- Returned to ONE unified SimpleRemoteDesk.exe process (Host + Viewer).
+- Tray Host remains active; opening Viewer creates a window inside the same process.
+- Hybrid portable publish: managed assemblies are bundled, native .NET runtime DLLs remain beside the EXE.
+- Native runtime is no longer embedded for self-extraction on every launch.
+- Rounded buttons no longer use aliased WinForms Region clipping.
+- Buttons are anti-aliased and have uniform borders, corners, text centering and disabled states.
+- Fixed Online indicator spacing on saved computer cards.
+- Increased Host Access section height so LAN/Radmin address cards are fully visible.
+- Fixed dark tray menu image margin/white stripe.
+- Host window remains fixed-size so layout cannot drift when resized.
+- Viewer keeps its responsive minimum-size layout and multi-session tabs/fullscreen mode from v2.8.

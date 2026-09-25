@@ -1,0 +1,6 @@
+Simple Remote Desk 2.10.3
+
+- Исправлена ошибка MSBuild MSB1006 «Ключ: en».
+- Удалён некорректный параметр SatelliteResourceLanguages из Build-Windows.bat.
+- Схема сборки сохранена: один процесс, маленький EXE, self-contained .NET DLL рядом.
+- На целевом ПК установка .NET не требуется.

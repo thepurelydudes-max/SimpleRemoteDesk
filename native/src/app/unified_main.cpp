@@ -1,4 +1,5 @@
 #include "host/host_service.h"
+#include "ui/dpi.h"
 #include "host/host_window.h"
 #include "settings/settings.h"
 #include "viewer/viewer_app.h"
@@ -359,6 +360,8 @@ int WINAPI wWinMain(
     PWSTR,
     int)
 {
+    srd::ui::enable_dpi_awareness();
+
     HANDLE mutex = ::CreateMutexW(
         nullptr,
         TRUE,

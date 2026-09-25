@@ -8,24 +8,11 @@
 #include "security/secure_session.h"
 #include "video/frame_packet.h"
 
-#include <windows.h>
-
-#include <memory>
 #include <stdexcept>
 #include <thread>
 #include <utility>
 
 namespace srd::video {
-
-namespace {
-
-DWORD WINAPI video_server_thread_proc(void* context)
-{
-    static_cast<VideoServer*>(context)->start();
-    return 0;
-}
-
-}
 
 VideoServer::VideoServer(
     LatestFrameMailbox& mailbox,
@@ -49,12 +36,28 @@ void VideoServer::start()
         return;
     }
 
-    std::thread([this] { run(); }).detach();
+    worker_ = std::thread(&VideoServer::run, this);
 }
 
 void VideoServer::stop() noexcept
 {
-    running_.store(false, std::memory_order_relaxed);
+    if (!running_.exchange(false)) {
+        return;
+    }
+
+    try {
+        net::SocketRuntime sockets;
+        auto wake = net::TcpSocket::connect_to("127.0.0.1", port_);
+        wake.close();
+    }
+    catch (...) {
+    }
+
+    mailbox_.stop();
+
+    if (worker_.joinable()) {
+        worker_.join();
+    }
 }
 
 void VideoServer::run()
@@ -65,6 +68,10 @@ void VideoServer::run()
 
         while (running_.load(std::memory_order_relaxed)) {
             auto socket = listener.accept_one();
+
+            if (!running_.load(std::memory_order_relaxed)) {
+                break;
+            }
 
             try {
                 core::Session transport(std::move(socket));
@@ -87,7 +94,7 @@ void VideoServer::run()
                 }
             }
             catch (...) {
-                // A dropped viewer must not stop the video listener.
+                // A dropped viewer must not stop the listener.
             }
         }
     }
@@ -104,6 +111,27 @@ VideoClient::VideoClient(
       password_(std::move(password)),
       port_(port)
 {
+}
+
+void VideoClient::receive_forever(
+    const std::function<void(EncodedFrame&&)>& onFrame)
+{
+    net::SocketRuntime sockets;
+    auto socket = net::TcpSocket::connect_to(host_, port_);
+    core::Session transport(std::move(socket));
+
+    auto keys = security::authenticate_client(transport, password_);
+    security::SecureSession secure(transport, std::move(keys));
+
+    for (;;) {
+        auto message = secure.receive();
+
+        if (message.type != protocol::MessageType::ScreenFrame) {
+            throw std::runtime_error("unexpected video channel message");
+        }
+
+        onFrame(deserialize_frame(message.payload));
+    }
 }
 
 } // namespace srd::video

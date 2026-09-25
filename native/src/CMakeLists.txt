@@ -90,11 +90,17 @@ target_link_libraries(VideoStreamClientTest PRIVATE
 add_executable(SimpleRemoteViewerGui WIN32
     viewer/gui_main.cpp
     viewer/live_view_window.cpp
+    viewer/session_runner.cpp
+    viewer/home_window.cpp
+    viewer/profile_dialog.cpp
 )
 
 target_link_libraries(SimpleRemoteViewerGui PRIVATE
     srd_core
     shell32
+    crypt32
+    advapi32
+    dwmapi
 )
 
 

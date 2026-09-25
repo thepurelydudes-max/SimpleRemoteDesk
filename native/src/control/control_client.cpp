@@ -147,4 +147,32 @@ void ControlClient::key(std::uint16_t virtualKey, bool down)
     send(protocol::MessageType::Key, payload);
 }
 
+void ControlClient::key_combo(std::initializer_list<std::uint16_t> keys)
+{
+    std::lock_guard lock(mutex_);
+
+    if (!secure_ || !connected_.load(std::memory_order_acquire))
+        return;
+
+    try {
+        for (const auto key : keys) {
+            auto payload = input::encode_key({key, true});
+            secure_->send(protocol::MessageType::Key, payload);
+        }
+
+        for (auto it = std::rbegin(keys); it != std::rend(keys); ++it) {
+            auto payload = input::encode_key({*it, false});
+            secure_->send(protocol::MessageType::Key, payload);
+        }
+    }
+    catch (...) {
+        connected_.store(false, std::memory_order_release);
+        if (transport_) transport_->close();
+        secure_.reset();
+        transport_.reset();
+        socketRuntime_.reset();
+        throw;
+    }
+}
+
 } // namespace srd::control

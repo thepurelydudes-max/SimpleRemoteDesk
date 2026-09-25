@@ -131,11 +131,7 @@ FileManifest build_manifest(
                 if (ec) continue;
 
                 const std::filesystem::path manifestPath =
-                    std::filesystem::path(
-                        std::u8string(
-                            reinterpret_cast<const char8_t*>(rootName.data()),
-                            rootName.size())) /
-                    relative;
+                    std::filesystem::u8path(rootName) / relative;
 
                 FileEntry entry;
                 entry.relativePath = path_utf8(manifestPath);

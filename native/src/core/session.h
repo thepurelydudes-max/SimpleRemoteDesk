@@ -13,6 +13,7 @@ public:
 
     void send(protocol::MessageType type, std::span<const std::byte> payload = {});
     protocol::Message receive();
+    void close() noexcept;
 
 private:
     net::TcpSocket socket_;

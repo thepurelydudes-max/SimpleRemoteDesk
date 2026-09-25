@@ -47,3 +47,12 @@ add_executable(SimpleRemoteViewer
 target_link_libraries(SimpleRemoteViewer PRIVATE
     srd_core
 )
+
+
+add_executable(CaptureSmokeTest
+    tools/capture_smoke_test.cpp
+)
+
+target_link_libraries(CaptureSmokeTest PRIVATE
+    srd_core
+)

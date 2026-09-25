@@ -3,7 +3,9 @@
 #include <windows.h>
 #include <shellapi.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstring>
 #include <filesystem>
 #include <vector>
 

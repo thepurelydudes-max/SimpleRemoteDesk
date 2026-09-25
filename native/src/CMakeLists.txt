@@ -59,3 +59,12 @@ add_executable(CaptureSmokeTest
 target_link_libraries(CaptureSmokeTest PRIVATE
     srd_core
 )
+
+
+add_executable(StreamSmokeTest
+    tools/stream_smoke_test.cpp
+)
+
+target_link_libraries(StreamSmokeTest PRIVATE
+    srd_core
+)

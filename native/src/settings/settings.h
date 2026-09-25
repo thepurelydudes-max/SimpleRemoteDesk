@@ -11,6 +11,7 @@ struct HostSettings {
     unsigned int fps{30};
     unsigned int jpegQuality{90};
     bool autostart{false};
+    std::string hostId;
 };
 
 HostSettings load_host_settings();

@@ -11,6 +11,8 @@
 #include <string>
 #include <thread>
 
+namespace srd::core { class Session; }
+
 namespace srd::video {
 class ScreenProducer;
 class VideoServer;
@@ -37,6 +39,7 @@ public:
 
     void start(HostConfig config);
     void stop() noexcept;
+    void disconnect_client() noexcept;
 
     [[nodiscard]] bool running() const noexcept;
     [[nodiscard]] bool client_connected() const noexcept;
@@ -57,6 +60,7 @@ private:
     std::unique_ptr<video::VideoServer> videoServer_;
 
     std::thread controlThread_;
+    core::Session* activeControlSession_{nullptr};
     std::atomic<bool> running_{false};
     std::atomic<bool> clientConnected_{false};
 };

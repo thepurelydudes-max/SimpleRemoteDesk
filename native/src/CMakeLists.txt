@@ -10,6 +10,9 @@ add_library(srd_core STATIC
     input/injector.cpp
     control/control_client.cpp
     audio/audio_channel.cpp
+    transfer/file_channel.cpp
+    transfer/clipboard_files.cpp
+    transfer/file_manifest.cpp
     audio/wave_player.cpp
     audio/loopback_capture.cpp
     host/host_service.cpp

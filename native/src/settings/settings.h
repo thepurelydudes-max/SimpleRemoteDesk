@@ -10,6 +10,7 @@ struct HostSettings {
     std::string password;
     unsigned int fps{30};
     unsigned int jpegQuality{90};
+    bool audioEnabled{true};
     bool autostart{false};
     std::string hostId;
 };

@@ -1,0 +1,27 @@
+#include <windows.h>
+1 ICON "../assets/AppIcon.ico"
+1 VERSIONINFO
+ FILEVERSION 3,0,0,0
+ PRODUCTVERSION 3,0,0,0
+ FILEFLAGSMASK 0x3fL
+ FILEFLAGS 0x0L
+ FILEOS 0x40004L
+ FILETYPE 0x1L
+BEGIN
+ BLOCK "StringFileInfo"
+ BEGIN
+  BLOCK "041904B0"
+  BEGIN
+   VALUE "FileDescription", "Simple Remote Desk Native C++\0"
+   VALUE "FileVersion", "3.0.0\0"
+   VALUE "InternalName", "SimpleRemoteDesk\0"
+   VALUE "OriginalFilename", "SimpleRemoteDesk.exe\0"
+   VALUE "ProductName", "Simple Remote Desk\0"
+   VALUE "ProductVersion", "3.0.0\0"
+  END
+ END
+ BLOCK "VarFileInfo"
+ BEGIN
+  VALUE "Translation", 0x419, 1200
+ END
+END

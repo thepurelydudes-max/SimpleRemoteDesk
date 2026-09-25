@@ -1,6 +1,7 @@
 #include "host/host_service.h"
 
 #include "capture/screen_capture.h"
+#include "audio/audio_channel.h"
 #include "core/session.h"
 #include "core/tcp_socket.h"
 #include "input/control_message.h"
@@ -140,6 +141,13 @@ void HostService::start(HostConfig config)
             config_.hostId.empty() ? "native-host" : config_.hostId,
             config_.port);
 
+        if (config_.audioEnabled) {
+            audioServer_ = std::make_unique<audio::AudioServer>(
+                config_.password,
+                static_cast<std::uint16_t>(config_.port + 3));
+            audioServer_->start();
+        }
+
         controlThread_ = std::thread(
             &HostService::control_server_loop,
             this);
@@ -175,6 +183,10 @@ void HostService::stop() noexcept
         }
     }
 
+    if (audioServer_) {
+        audioServer_->stop();
+    }
+
     if (discoveryBeacon_) {
         discoveryBeacon_->stop();
     }
@@ -195,6 +207,7 @@ void HostService::stop() noexcept
         controlThread_.join();
     }
 
+    audioServer_.reset();
     discoveryBeacon_.reset();
     videoServer_.reset();
     producer_.reset();

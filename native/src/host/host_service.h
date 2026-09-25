@@ -14,6 +14,7 @@
 
 namespace srd::core { class Session; }
 namespace srd::audio { class AudioServer; }
+namespace srd::transfer { class FileServer; }
 
 namespace srd::video {
 class ScreenProducer;
@@ -64,6 +65,7 @@ private:
     std::unique_ptr<video::VideoServer> videoServer_;
     std::unique_ptr<network::DiscoveryBeacon> discoveryBeacon_;
     std::unique_ptr<audio::AudioServer> audioServer_;
+    std::unique_ptr<transfer::FileServer> fileServer_;
 
     std::thread controlThread_;
     core::Session* activeControlSession_{nullptr};

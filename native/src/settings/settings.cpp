@@ -237,6 +237,9 @@ HostSettings load_host_settings()
         40u,
         100u);
 
+    settings.audioEnabled =
+        read_bool(L"Host", L"AudioEnabled", true, path);
+
     wchar_t passwordBuffer[8192]{};
     ::GetPrivateProfileStringW(
         L"Host",
@@ -278,6 +281,12 @@ void save_host_settings(const HostSettings& settings)
         L"Host",
         L"JpegQuality",
         std::to_wstring(settings.jpegQuality),
+        path);
+
+    write_text(
+        L"Host",
+        L"AudioEnabled",
+        settings.audioEnabled ? L"1" : L"0",
         path);
 
     write_text(

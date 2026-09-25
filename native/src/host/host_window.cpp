@@ -601,6 +601,7 @@ void HostWindow::toggle_server()
         config.fps = settings_.fps;
         config.jpegQuality =
             static_cast<float>(settings_.jpegQuality) / 100.0f;
+        config.hostId = settings_.hostId;
 
         service_.start(std::move(config));
     }

@@ -13,6 +13,8 @@
 
 namespace srd::core { class Session; }
 
+namespace srd::network { class DiscoveryBeacon; }
+
 namespace srd::video {
 class ScreenProducer;
 class VideoServer;
@@ -25,6 +27,7 @@ struct HostConfig {
     std::string password{"change-me"};
     unsigned int fps{30};
     float jpegQuality{0.90f};
+    std::string hostId;
 };
 
 class HostService {
@@ -58,6 +61,7 @@ private:
     std::unique_ptr<video::LatestFrameMailbox> videoMailbox_;
     std::unique_ptr<video::ScreenProducer> producer_;
     std::unique_ptr<video::VideoServer> videoServer_;
+    std::unique_ptr<network::DiscoveryBeacon> discoveryBeacon_;
 
     std::thread controlThread_;
     core::Session* activeControlSession_{nullptr};

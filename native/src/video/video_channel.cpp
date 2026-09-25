@@ -113,24 +113,71 @@ VideoClient::VideoClient(
 {
 }
 
+VideoClient::~VideoClient()
+{
+    stop();
+}
+
 void VideoClient::receive_forever(
     const std::function<void(EncodedFrame&&)>& onFrame)
 {
+    running_.store(true, std::memory_order_release);
+
     net::SocketRuntime sockets;
     auto socket = net::TcpSocket::connect_to(host_, port_);
-    core::Session transport(std::move(socket));
 
-    auto keys = security::authenticate_client(transport, password_);
-    security::SecureSession secure(transport, std::move(keys));
+    {
+        std::lock_guard lock(sessionMutex_);
+        session_ = std::make_unique<core::Session>(std::move(socket));
+    }
 
-    for (;;) {
-        auto message = secure.receive();
-
-        if (message.type != protocol::MessageType::ScreenFrame) {
-            throw std::runtime_error("unexpected video channel message");
+    try {
+        core::Session* transport = nullptr;
+        {
+            std::lock_guard lock(sessionMutex_);
+            transport = session_.get();
         }
 
-        onFrame(deserialize_frame(message.payload));
+        if (!transport) {
+            throw std::runtime_error("video session unavailable");
+        }
+
+        auto keys = security::authenticate_client(*transport, password_);
+        security::SecureSession secure(*transport, std::move(keys));
+
+        while (running_.load(std::memory_order_acquire)) {
+            auto message = secure.receive();
+
+            if (message.type != protocol::MessageType::ScreenFrame) {
+                throw std::runtime_error("unexpected video channel message");
+            }
+
+            onFrame(deserialize_frame(message.payload));
+        }
+    }
+    catch (...) {
+        {
+            std::lock_guard lock(sessionMutex_);
+            session_.reset();
+        }
+        running_.store(false, std::memory_order_release);
+        throw;
+    }
+
+    {
+        std::lock_guard lock(sessionMutex_);
+        session_.reset();
+    }
+    running_.store(false, std::memory_order_release);
+}
+
+void VideoClient::stop() noexcept
+{
+    running_.store(false, std::memory_order_release);
+
+    std::lock_guard lock(sessionMutex_);
+    if (session_) {
+        session_->close();
     }
 }
 

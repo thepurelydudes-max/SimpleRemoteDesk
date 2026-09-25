@@ -54,7 +54,7 @@ powershell -NoProfile -ExecutionPolicy Bypass -File "%~dp0BuildTools\Patch-AppHo
 if errorlevel 1 goto :fail
 
 (
-  echo Simple Remote Desk 2.11 - structured portable build
+  echo Simple Remote Desk 2.11.6 HOVER FIX - structured portable build
   echo.
   echo START: SimpleRemoteDesk.exe
   echo.

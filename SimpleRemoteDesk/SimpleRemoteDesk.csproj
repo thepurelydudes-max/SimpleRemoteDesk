@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+﻿<Project Sdk="Microsoft.NET.Sdk">
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
@@ -7,7 +7,7 @@
     <Nullable>enable</Nullable>
     <AssemblyName>SimpleRemoteDesk</AssemblyName>
     <RootNamespace>SimpleRemoteDesk</RootNamespace>
-    <Version>2.11.4</Version>
+    <Version>2.11.8</Version>
     <ApplicationIcon>..\RemoteHost\AppIcon.ico</ApplicationIcon>
     <StartupObject>SimpleRemoteDesk.Program</StartupObject>
   </PropertyGroup>

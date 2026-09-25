@@ -1,0 +1,26 @@
+SimpleRemoteDesk v2.11.8 — UI THREAD / WINDOW DRAG FIX
+
+Исправлено периодическое подвисание окон при непрерывном быстром перетаскивании.
+
+Точная причина:
+- Viewer каждые 2 секунды обновляет presence устройств;
+- Host также рассылает discovery beacon каждые 2 секунды;
+- обработка beacon и presence выполняла EndpointPriority.Score()/Kind() в UI-потоке;
+- Score()/Kind() каждый раз вызывали NetworkInterface.GetAllNetworkInterfaces();
+- при LAN + Radmin/VPN это происходило многократно за один пакет/цикл;
+- Windows Network API мог задержать UI message loop, поэтому перетаскиваемое окно на мгновение замирало, затем догоняло курсор.
+
+Исправление:
+- физические LAN-подсети теперь хранятся в immutable cache;
+- NetworkInterface.GetAllNetworkInterfaces() больше не вызывается из Score()/Kind();
+- cache строится и обновляется только в ThreadPool;
+- обновление выполняется при изменении сетевых адресов и раз в 30 секунд;
+- первый cache warm-up запускается до старта discovery, но не блокирует UI;
+- логика приоритета LAN > Radmin VPN сохранена.
+
+Не изменялись:
+- протокол удалённого доступа;
+- discovery packet format;
+- передача экрана/управления/звука;
+- UI layout;
+- предыдущие фиксы v2.11.5-v2.11.7.

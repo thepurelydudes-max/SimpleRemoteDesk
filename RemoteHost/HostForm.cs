@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
@@ -7,18 +7,6 @@ namespace RemoteHost;
 
 internal sealed class HostForm : Form
 {
-    private const int WS_EX_COMPOSITED = 0x02000000;
-
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            CreateParams cp = base.CreateParams;
-            cp.ExStyle |= WS_EX_COMPOSITED;
-            return cp;
-        }
-    }
-
     private readonly RemoteServer _server = new();
     private readonly HostSettings _settings;
 
@@ -98,8 +86,13 @@ internal sealed class HostForm : Form
         UiTheme.StyleCombo(_audioDevice);
         _audio.ForeColor = UiTheme.Text;
         _audio.BackColor = UiTheme.Surface;
+        // Keep the checkbox background fully owned by WinForms. With visual-style
+        // background painting enabled, entering/leaving the audio controls can
+        // trigger an extra themed background erase before the dark parent repaints.
+        _audio.UseVisualStyleBackColor = false;
         _autostart.ForeColor = UiTheme.Text;
         _autostart.BackColor = UiTheme.Surface;
+        _autostart.UseVisualStyleBackColor = false;
         _statusTitle.Font = new Font("Segoe UI Semibold", 15F, FontStyle.Bold);
         _statusTitle.ForeColor = UiTheme.Offline;
         _statusHint.ForeColor = UiTheme.Muted;
@@ -353,7 +346,10 @@ internal sealed class HostForm : Form
         var right = new TableLayoutPanel
         {
             Dock = DockStyle.Fill,
-            BackColor = Color.Transparent,
+            // Native CheckBox/ComboBox controls repaint their hot state on mouse hover.
+            // An opaque host prevents those repaints from walking through a transparent
+            // TableLayoutPanel into the custom-painted PremiumPanel underneath.
+            BackColor = UiTheme.Surface,
             ColumnCount = 1,
             RowCount = 3,
             Padding = new Padding(20, 2, 0, 0),

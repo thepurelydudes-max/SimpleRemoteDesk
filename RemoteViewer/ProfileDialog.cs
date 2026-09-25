@@ -134,55 +134,24 @@ internal static class ProfileDialog
 
     private sealed class NoFlashDialogForm : Form
     {
-        private const int WS_EX_COMPOSITED = 0x02000000;
-
         public NoFlashDialogForm()
         {
             BackColor = UiTheme.Bg;
+            // Do not combine WS_EX_COMPOSITED with a layered (Opacity) modal window.
+            // That combination makes WinForms child controls (TextBox/TableLayoutPanel/custom panels)
+            // briefly paint as dark/black rectangles while the dialog is being invalidated.
             SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer |
-                     ControlStyles.ResizeRedraw | ControlStyles.UserPaint, true);
+                     ControlStyles.ResizeRedraw, true);
             DoubleBuffered = true;
-        }
-
-        protected override CreateParams CreateParams
-        {
-            get
-            {
-                CreateParams cp = base.CreateParams;
-                cp.ExStyle |= WS_EX_COMPOSITED;
-                return cp;
-            }
         }
 
         public DialogResult ShowPrepared(IWin32Window owner)
         {
-            Opacity = 0;
             ShowInTaskbar = false;
             if (!IsHandleCreated) CreateControl();
             PerformLayout();
-
-            EventHandler? visibleHandler = null;
-            visibleHandler = (_, _) =>
-            {
-                if (!Visible || IsDisposed) return;
-                BeginInvoke(new Action(() =>
-                {
-                    if (IsDisposed) return;
-                    Invalidate(true);
-                    Update();
-                    Opacity = 1;
-                }));
-            };
-            VisibleChanged += visibleHandler;
-            try
-            {
-                return ShowDialog(owner);
-            }
-            finally
-            {
-                VisibleChanged -= visibleHandler;
-                if (!IsDisposed) Opacity = 1;
-            }
+            Invalidate(true);
+            return ShowDialog(owner);
         }
     }
 

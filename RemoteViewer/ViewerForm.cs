@@ -1,22 +1,11 @@
-namespace RemoteViewer;
+﻿namespace RemoteViewer;
 
 internal sealed class ViewerForm : Form
 {
     private const int WM_SETREDRAW = 0x000B;
-    private const int WS_EX_COMPOSITED = 0x02000000;
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     private static extern IntPtr SendMessage(IntPtr hWnd, int msg, IntPtr wParam, IntPtr lParam);
-
-    protected override CreateParams CreateParams
-    {
-        get
-        {
-            CreateParams cp = base.CreateParams;
-            cp.ExStyle |= WS_EX_COMPOSITED;
-            return cp;
-        }
-    }
 
     private readonly DiscoveryListener _discovery = new();
     private readonly List<ConnectionProfile> _profiles = ViewerSettingsStore.Load();
@@ -103,6 +92,10 @@ internal sealed class ViewerForm : Form
         UiTheme.StyleForm(this);
         SetStyle(ControlStyles.AllPaintingInWmPaint | ControlStyles.OptimizedDoubleBuffer | ControlStyles.ResizeRedraw, true);
         DoubleBuffered = true;
+
+        // Build the LAN subnet snapshot on a worker thread before discovery traffic starts.
+        // Score()/Kind() stay allocation-light and never enumerate Windows adapters on the UI thread.
+        EndpointPriority.WarmUp();
 
         BuildNavigation();
         BuildComputersPage();
@@ -378,10 +371,22 @@ internal sealed class ViewerForm : Form
         }
         finally
         {
-            _discoveredFlow.ResumeLayout(false);
-            _savedFlow.ResumeLayout(false);
-            _computerBody.ResumeLayout(false);
-            _computerScroll.ResumeLayout(false);
+            // Resume with layout enabled. ResumeLayout(false) left newly added cards in the
+            // FlowLayoutPanel without a layout pass, so they only became visible after a later
+            // resize/rebuild (or after restarting the Viewer).
+            _discoveredFlow.ResumeLayout(true);
+            _savedFlow.ResumeLayout(true);
+            _computerBody.ResumeLayout(true);
+            _computerScroll.ResumeLayout(true);
+
+            // Recalculate the manually sized containers after the controls have been added/removed,
+            // then explicitly lay them out while redraw is still suspended.
+            LayoutComputerContent();
+            _savedFlow.PerformLayout();
+            _discoveredFlow.PerformLayout();
+            _computerBody.PerformLayout();
+            _computerScroll.PerformLayout();
+
             if (redrawSuspended) SendMessage(_computerScroll.Handle, WM_SETREDRAW, new IntPtr(1), IntPtr.Zero);
             _computerScroll.Invalidate(true);
             _computerScroll.Update();
@@ -875,7 +880,16 @@ internal sealed class ViewerForm : Form
 
         int lanTextRight = 158 + TextRenderer.MeasureText(lanAddress.Text, lanAddress.Font, Size.Empty, TextFormatFlags.NoPadding).Width;
         int vpnTextRight = 158 + TextRenderer.MeasureText(vpnAddress.Text, vpnAddress.Font, Size.Empty, TextFormatFlags.NoPadding).Width;
-        int actionLeft = Math.Clamp(Math.Max(lanTextRight, vpnTextRight) + 14, 300, 386);
+        int actionLeft = Math.Clamp(Math.Max(lanTextRight, vpnTextRight) + 14, 330, card.Width - 188);
+
+        // Keep all text controls strictly to the left of the action area. Previously their
+        // rectangles physically overlapped the Online label and both upper/lower parts of the
+        // Add button; transparent WinForms labels then repainted the parent through the button,
+        // which looked like two blue/dark horizontal stripes and could hide Online completely.
+        int textRight = actionLeft - 14;
+        name.Width = Math.Max(120, textRight - name.Left);
+        lanAddress.Width = Math.Max(80, textRight - lanAddress.Left);
+        vpnAddress.Width = Math.Max(80, textRight - vpnAddress.Left);
 
         var dot = new StatusDot { Left = actionLeft, Top = 22, DotColor = UiTheme.Success };
         var online = new Label
@@ -890,6 +904,11 @@ internal sealed class ViewerForm : Form
         add.Click += (_, _) => AddDiscoveredProfile(preferred);
 
         card.Controls.AddRange(new Control[] { icon, name, lanKind, lanAddress, vpnKind, vpnAddress, dot, online, add });
+        // The action controls are intentionally forced to the front as an additional guard
+        // against WinForms sibling transparency/z-order repaint artefacts.
+        add.BringToFront();
+        online.BringToFront();
+        dot.BringToFront();
         return card;
     }
 

@@ -567,6 +567,22 @@ public:
     std::vector<Seen> snapshot(){std::lock_guard lk(mu_);auto now=Clock::now();seen_.erase(std::remove_if(seen_.begin(),seen_.end(),[&](auto&s){return now-s.t>std::chrono::seconds(7);}),seen_.end());return seen_;}
 };
 
+
+static std::pair<std::string,std::string> local_ipv4s(){
+    std::string lan,vpn;ULONG n=16000;std::vector<byte>b(n);auto* aa=(IP_ADAPTER_ADDRESSES*)b.data();
+    ULONG rc=GetAdaptersAddresses(AF_INET,GAA_FLAG_SKIP_ANYCAST|GAA_FLAG_SKIP_MULTICAST|GAA_FLAG_SKIP_DNS_SERVER,nullptr,aa,&n);
+    if(rc==ERROR_BUFFER_OVERFLOW){b.resize(n);aa=(IP_ADAPTER_ADDRESSES*)b.data();rc=GetAdaptersAddresses(AF_INET,GAA_FLAG_SKIP_ANYCAST|GAA_FLAG_SKIP_MULTICAST|GAA_FLAG_SKIP_DNS_SERVER,nullptr,aa,&n);}
+    if(rc!=NO_ERROR)return{lan,vpn};
+    for(auto*a=aa;a;a=a->Next){
+        if(a->OperStatus!=IfOperStatusUp||a->IfType==IF_TYPE_SOFTWARE_LOOPBACK)continue;
+        std::wstring info=(a->FriendlyName?a->FriendlyName:L"");info+=L" ";info+=(a->Description?a->Description:L"");std::transform(info.begin(),info.end(),info.begin(),::towlower);
+        bool rad=info.find(L"radmin")!=std::wstring::npos;
+        bool virt=rad||info.find(L"vpn")!=std::wstring::npos||info.find(L"virtual")!=std::wstring::npos||info.find(L"vmware")!=std::wstring::npos||info.find(L"hyper-v")!=std::wstring::npos||info.find(L"vethernet")!=std::wstring::npos||info.find(L"tailscale")!=std::wstring::npos||info.find(L"zerotier")!=std::wstring::npos||info.find(L"wireguard")!=std::wstring::npos||info.find(L"docker")!=std::wstring::npos||info.find(L"wsl")!=std::wstring::npos||info.find(L"tap")!=std::wstring::npos||info.find(L"tun")!=std::wstring::npos;
+        for(auto*u=a->FirstUnicastAddress;u;u=u->Next){if(!u->Address.lpSockaddr||u->Address.lpSockaddr->sa_family!=AF_INET)continue;char ip[64]{};auto*sa=(sockaddr_in*)u->Address.lpSockaddr;InetNtopA(AF_INET,&sa->sin_addr,ip,sizeof(ip));if(rad&&vpn.empty())vpn=ip;else if(!virt&&lan.empty())lan=ip;}
+    }
+    return{lan,vpn};
+}
+
 class HostServer{
     Config cfg_;std::array<Sock,5>ls_;std::vector<std::jthread>ats_;std::atomic<bool>run_{false},session_{false};std::mutex sm_;std::string sip_;SOCKET ds_=INVALID_SOCKET,cs_=INVALID_SOCKET;
     void end(){std::lock_guard lk(sm_);session_=false;sip_.clear();if(ds_!=INVALID_SOCKET){shutdown(ds_,SD_BOTH);ds_=INVALID_SOCKET;}if(cs_!=INVALID_SOCKET){shutdown(cs_,SD_BOTH);cs_=INVALID_SOCKET;}}
@@ -612,7 +628,7 @@ public:
     ~HostServer(){stop();}
     bool start(){if(run_.exchange(true))return true;for(int i=0;i<5;i++){ls_[i]=listen_tcp(cfg_.port+i);if(!ls_[i]){stop();return false;}}for(int i=0;i<5;i++)ats_.emplace_back([this,i](std::stop_token){acceptor(i);});return true;}
     void stop(){if(!run_.exchange(false))return;end();for(auto&x:ls_)x.close();for(auto&t:ats_)if(t.joinable()){t.request_stop();t.join();}ats_.clear();}
-    bool running()const{return run_;}void disconnect(){end();}
+    bool running()const{return run_;}bool has_client(){std::lock_guard lk(sm_);return session_;}std::string client_ip(){std::lock_guard lk(sm_);return sip_;}void disconnect(){end();}
 };
 
 class Client{
@@ -708,8 +724,8 @@ static App* GAPP=nullptr;
 
 class App{
 public:
-    Config cfg=load_cfg();std::atomic<bool> file_busy{false};std::unique_ptr<HostServer>host;std::unique_ptr<Discovery>disc;std::unique_ptr<Client>client;HWND hw_host{},hw_view{};NOTIFYICONDATAW tray{};HICON icon{};HFONT f9{},f10{},f12{},f15{};std::mutex fm,pm;HBITMAP frame{};int fw{},fh{};std::string target_ip;int target_port=45900;std::string target_pass="123456";std::vector<Profile> profiles;std::unordered_map<std::string,HBITMAP> thumbs;std::vector<ViewHit> hits;
-    App(){f9=mkfont(9);f10=mkfont(10);f12=mkfont(12,true);f15=mkfont(15,true);profiles=load_profiles();icon=(HICON)LoadImageW(GH,MAKEINTRESOURCEW(1),IMAGE_ICON,32,32,LR_DEFAULTCOLOR);for(auto&p:profiles){if(auto h=load_image_file(thumb_path(p.id)))thumbs[p.id]=h;}host=std::make_unique<HostServer>(cfg);host->start();disc=std::make_unique<Discovery>(cfg.port,cfg.hostid);disc->start();}
+    Config cfg=load_cfg();std::atomic<bool> file_busy{false};std::unique_ptr<HostServer>host;std::unique_ptr<Discovery>disc;std::unique_ptr<Client>client;HWND hw_host{},hw_view{};NOTIFYICONDATAW tray{};HICON icon{};HFONT f9{},f10{},f12{},f15{};std::mutex fm,pm;HBITMAP frame{};int fw{},fh{};std::string target_ip;int target_port=45900;std::string target_pass="123456";std::vector<Profile> profiles;std::unordered_map<std::string,HBITMAP> thumbs;std::vector<ViewHit> hits;std::string lan_ip,vpn_ip;
+    App(){f9=mkfont(9);f10=mkfont(10);f12=mkfont(12,true);f15=mkfont(15,true);profiles=load_profiles();{auto a=local_ipv4s();lan_ip=a.first;vpn_ip=a.second;}icon=(HICON)LoadImageW(GH,MAKEINTRESOURCEW(1),IMAGE_ICON,32,32,LR_DEFAULTCOLOR);for(auto&p:profiles){if(auto h=load_image_file(thumb_path(p.id)))thumbs[p.id]=h;}host=std::make_unique<HostServer>(cfg);host->start();disc=std::make_unique<Discovery>(cfg.port,cfg.hostid);disc->start();}
     ~App(){if(client)client->close();if(disc)disc->stop();if(host)host->stop();if(frame)DeleteObject(frame);for(auto&[_,h]:thumbs)if(h)DeleteObject(h);DeleteObject(f9);DeleteObject(f10);DeleteObject(f12);DeleteObject(f15);}
     void setup_tray(){tray.cbSize=sizeof(tray);tray.hWnd=hw_host;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=icon;wcscpy_s(tray.szTip,L"Simple Remote Desk");Shell_NotifyIconW(NIM_ADD,&tray);}
     void show_view(){ShowWindow(hw_view,SW_SHOWMAXIMIZED);SetForegroundWindow(hw_view);}

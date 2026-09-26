@@ -212,6 +212,8 @@ static void mouse_button(byte b,bool d){DWORD f=0;if(b==0)f=d?MOUSEEVENTF_LEFTDO
 static void mouse_wheel(int d){INPUT i{};i.type=INPUT_MOUSE;i.mi.dwFlags=MOUSEEVENTF_WHEEL;i.mi.mouseData=d;SendInput(1,&i,sizeof(i));}
 static void key_event(int vk,bool down){INPUT i{};i.type=INPUT_KEYBOARD;i.ki.wVk=(WORD)vk;i.ki.dwFlags=down?0:KEYEVENTF_KEYUP;SendInput(1,&i,sizeof(i));}
 
+static std::string json_unescape(std::string_view s);
+static std::string json_escape(std::string_view s);
 static std::string b64_encode(std::span<const byte> d){
     if(d.empty())return{};DWORD n=0;CryptBinaryToStringA(d.data(),(DWORD)d.size(),CRYPT_STRING_BASE64|CRYPT_STRING_NOCRLF,nullptr,&n);
     std::string o(n? n-1:0,'\0');if(n)CryptBinaryToStringA(d.data(),(DWORD)d.size(),CRYPT_STRING_BASE64|CRYPT_STRING_NOCRLF,o.data(),&n);return o;

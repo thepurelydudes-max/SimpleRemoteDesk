@@ -10,6 +10,7 @@
 #include <gdiplus.h>
 #include <shellapi.h>
 #include <shlobj.h>
+#include <shlwapi.h>
 #include <iphlpapi.h>
 #include <commctrl.h>
 #include <dwmapi.h>
@@ -18,6 +19,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <cstdint>
 #include <cstring>
 #include <deque>
@@ -305,7 +307,22 @@ static LRESULT CALLBACK viewproc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_FRAME:InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_KEYDOWN:if(GAPP->client&&GAPP->client->running()){if(w==VK_F11){LONG s=GetWindowLongW(h,GWL_STYLE);SetWindowLongW(h,GWL_STYLE,s^WS_OVERLAPPEDWINDOW);ShowWindow(h,SW_MAXIMIZE);return 0;}GAPP->client->key((int)w,true);return 0;}break;
     case WM_KEYUP:if(GAPP->client&&GAPP->client->running()){GAPP->client->key((int)w,false);return 0;}break;
-    case WM_MOUSEMOVE:if(GAPP->client&&GAPP->client->running()){RECT c;GetClientRect(h,&c);int y=GET_Y_LPARAM(l)-95;if(y>=0){int x=GET_X_LPARAM(l);int rw=GAPP->fw,rh=GAPP->fh;if(rw>0&&rh>0){RECT ar{0,95,c.right,c.bottom};double sc=std::min((double)(ar.right-ar.left)/rw,(double)(ar.bottom-ar.top)/rh);int dw=(int)(rw*sc),dh=(int)(rh*sc),ox=(c.right-dw)/2,oy=95+(c.bottom-95-dh)/2;if(x>=ox&&x<ox+dw&&GET_Y_LPARAM(l)>=oy&&GET_Y_LPARAM(l)<oy+dh)GAPP->client->mm((int)((x-ox)/sc),(int)((GET_Y_LPARAM(l)-oy)/sc));}}}return 0;}break;
+    case WM_MOUSEMOVE:
+        if(GAPP->client&&GAPP->client->running()){
+            RECT c{}; GetClientRect(h,&c);
+            int py=GET_Y_LPARAM(l);
+            if(py>=95){
+                int px=GET_X_LPARAM(l), rw=GAPP->fw, rh=GAPP->fh;
+                if(rw>0&&rh>0){
+                    double sc=std::min((double)c.right/rw,(double)(c.bottom-95)/rh);
+                    int dw=(int)(rw*sc),dh=(int)(rh*sc),ox=(c.right-dw)/2,oy=95+(c.bottom-95-dh)/2;
+                    if(px>=ox&&px<ox+dw&&py>=oy&&py<oy+dh)
+                        GAPP->client->mm((int)((px-ox)/sc),(int)((py-oy)/sc));
+                }
+            }
+            return 0;
+        }
+        break;
     case WM_LBUTTONDOWN:if(GAPP->client&&GAPP->client->running()){SetFocus(h);GAPP->client->mb(0,true);return 0;}break;
     case WM_LBUTTONUP:if(GAPP->client&&GAPP->client->running()){GAPP->client->mb(0,false);return 0;}break;
     case WM_RBUTTONDOWN:if(GAPP->client&&GAPP->client->running()){GAPP->client->mb(1,true);return 0;}break;

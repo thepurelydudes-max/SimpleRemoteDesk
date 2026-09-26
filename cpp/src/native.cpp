@@ -708,11 +708,48 @@ static App* GAPP=nullptr;
 
 class App{
 public:
-    Config cfg=load_cfg();std::atomic<bool> file_busy{false};std::unique_ptr<HostServer>host;std::unique_ptr<Discovery>disc;std::unique_ptr<Client>client;HWND hw_host{},hw_view{};NOTIFYICONDATAW tray{};HICON icon{};HFONT f9{},f10{},f12{},f15{};std::mutex fm;HBITMAP frame{};int fw{},fh{};std::string target_ip;int target_port=45900;std::string target_pass="123456";
-    App(){f9=mkfont(9);f10=(HFONT)GetStockObject(DEFAULT_GUI_FONT);f12=mkfont(12,true);f15=(HFONT)GetStockObject(DEFAULT_GUI_FONT);icon=(HICON)LoadImageW(GH,MAKEINTRESOURCEW(1),IMAGE_ICON,32,32,LR_DEFAULTCOLOR);host=std::make_unique<HostServer>(cfg);host->start();disc=std::make_unique<Discovery>(cfg.port,cfg.hostid);disc->start();}
-    ~App(){if(client)client->close();if(disc)disc->stop();if(host)host->stop();if(frame)DeleteObject(frame);DeleteObject(f9);DeleteObject(f10);DeleteObject(f12);DeleteObject(f15);}
+    Config cfg=load_cfg();std::atomic<bool> file_busy{false};std::unique_ptr<HostServer>host;std::unique_ptr<Discovery>disc;std::unique_ptr<Client>client;HWND hw_host{},hw_view{};NOTIFYICONDATAW tray{};HICON icon{};HFONT f9{},f10{},f12{},f15{};std::mutex fm,pm;HBITMAP frame{};int fw{},fh{};std::string target_ip;int target_port=45900;std::string target_pass="123456";std::vector<Profile> profiles;std::unordered_map<std::string,HBITMAP> thumbs;std::vector<ViewHit> hits;
+    App(){f9=mkfont(9);f10=mkfont(10);f12=mkfont(12,true);f15=mkfont(15,true);profiles=load_profiles();icon=(HICON)LoadImageW(GH,MAKEINTRESOURCEW(1),IMAGE_ICON,32,32,LR_DEFAULTCOLOR);for(auto&p:profiles){if(auto h=load_image_file(thumb_path(p.id)))thumbs[p.id]=h;}host=std::make_unique<HostServer>(cfg);host->start();disc=std::make_unique<Discovery>(cfg.port,cfg.hostid);disc->start();}
+    ~App(){if(client)client->close();if(disc)disc->stop();if(host)host->stop();if(frame)DeleteObject(frame);for(auto&[_,h]:thumbs)if(h)DeleteObject(h);DeleteObject(f9);DeleteObject(f10);DeleteObject(f12);DeleteObject(f15);}
     void setup_tray(){tray.cbSize=sizeof(tray);tray.hWnd=hw_host;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=icon;wcscpy_s(tray.szTip,L"Simple Remote Desk");Shell_NotifyIconW(NIM_ADD,&tray);}
     void show_view(){ShowWindow(hw_view,SW_SHOWMAXIMIZED);SetForegroundWindow(hw_view);}
+    static int endpoint_score(const Seen&s){
+        IN_ADDR a{};if(InetPtonA(AF_INET,s.ip.c_str(),&a)!=1)return 0;auto v=ntohl(a.S_un.S_addr);int b0=(v>>24)&255,b1=(v>>16)&255;
+        if(b0==26)return 700;if(b0==100&&b1>=64&&b1<=127)return 650;if(b0==10||(b0==172&&b1>=16&&b1<=31)||(b0==192&&b1==168))return 800;return 200;
+    }
+    std::optional<Seen> online_for(const Profile&p){
+        auto seen=disc->snapshot();std::optional<Seen> best;
+        for(auto&s:seen){bool match=!p.hostid.empty()?s.id==p.hostid:s.ip==p.host;if(!match)continue;if(!best||endpoint_score(s)>endpoint_score(*best))best=s;}
+        return best;
+    }
+    HBITMAP thumb_for(const Profile&p){std::lock_guard lk(pm);auto it=thumbs.find(p.id);return it==thumbs.end()?nullptr:it->second;}
+    void refresh_thumb_async(Profile p){
+        std::thread([this,p=std::move(p)]{if(!fetch_preview(p))return;HBITMAP h=load_image_file(thumb_path(p.id));if(!h)return;{std::lock_guard lk(pm);auto&slot=thumbs[p.id];if(slot)DeleteObject(slot);slot=h;}if(hw_view)PostMessageW(hw_view,WM_FRAME,0,0);}).detach();
+    }
+    void add_manual(){
+        Profile p;p.id=rndhex();p.name="Новый компьютер";if(!edit_profile(hw_view,p,true))return;
+        {std::lock_guard lk(pm);profiles.push_back(p);save_profiles(profiles);}refresh_thumb_async(p);InvalidateRect(hw_view,nullptr,TRUE);
+    }
+    void add_seen(const std::string&id){
+        auto v=disc->snapshot();auto it=std::find_if(v.begin(),v.end(),[&](auto&s){return s.id==id;});if(it==v.end())return;
+        Profile p;p.id=rndhex();p.hostid=it->id;p.name=it->name;p.host=it->ip;p.port=it->port;if(!edit_profile(hw_view,p,true))return;
+        {std::lock_guard lk(pm);profiles.push_back(p);save_profiles(profiles);}refresh_thumb_async(p);InvalidateRect(hw_view,nullptr,TRUE);
+    }
+    void edit_saved(int idx){
+        Profile p;{std::lock_guard lk(pm);if(idx<0||idx>=(int)profiles.size())return;p=profiles[idx];}
+        if(!edit_profile(hw_view,p,false))return;{std::lock_guard lk(pm);if(idx<(int)profiles.size())profiles[idx]=p;save_profiles(profiles);}refresh_thumb_async(p);InvalidateRect(hw_view,nullptr,TRUE);
+    }
+    void delete_saved(int idx){
+        Profile p;{std::lock_guard lk(pm);if(idx<0||idx>=(int)profiles.size())return;p=profiles[idx];}
+        if(MessageBoxW(hw_view,(L"Удалить компьютер «"+u8w(p.name)+L"»?").c_str(),L"Simple Remote Desk",MB_YESNO|MB_ICONQUESTION)!=IDYES)return;
+        {std::lock_guard lk(pm);if(idx<(int)profiles.size())profiles.erase(profiles.begin()+idx);auto it=thumbs.find(p.id);if(it!=thumbs.end()){if(it->second)DeleteObject(it->second);thumbs.erase(it);}save_profiles(profiles);}
+        std::error_code ec;std::filesystem::remove(thumb_path(p.id),ec);InvalidateRect(hw_view,nullptr,TRUE);
+    }
+    void connect_saved(int idx){
+        Profile p;{std::lock_guard lk(pm);if(idx<0||idx>=(int)profiles.size())return;p=profiles[idx];}
+        if(auto o=online_for(p)){p.host=o->ip;p.port=o->port;{std::lock_guard lk(pm);if(idx<(int)profiles.size()){profiles[idx].host=p.host;profiles[idx].port=p.port;save_profiles(profiles);}}}
+        connect_to(p.host,p.port,p.pass);
+    }
     void copy_remote_files(){
       if(file_busy.exchange(true)||!client||!client->running())return;
       client->combo({VK_CONTROL,'C'});

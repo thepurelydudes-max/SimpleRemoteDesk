@@ -410,6 +410,33 @@ static int remote_clipboard_put(std::string host,int port,std::string pass,const
 }
 
 
+
+struct Profile{
+    std::string id,hostid,name="Компьютер",host,pass;int port=45900;
+};
+static std::vector<Profile> load_profiles(){
+    std::vector<Profile> out;std::ifstream f(app_dir()/L"viewer.json",std::ios::binary);if(!f)return out;std::stringstream ss;ss<<f.rdbuf();std::string j=ss.str();
+    bool str=false,esc=false;int depth=0;size_t b=0;
+    for(size_t i=0;i<j.size();i++){char c=j[i];if(str){if(!esc&&c=='"')str=false;if(!esc&&c=='\\')esc=true;else esc=false;continue;}if(c=='"'){str=true;continue;}if(c=='{'){if(depth++==0)b=i;}else if(c=='}'&&depth>0&&--depth==0){auto o=std::string_view(j).substr(b,i-b+1);Profile p;p.id=json_field_string(o,"Id").value_or(rndhex());p.hostid=json_field_string(o,"HostId").value_or("");p.name=json_field_string(o,"Name").value_or("Компьютер");p.host=json_field_string(o,"Host").value_or("");p.port=(int)json_field_u64(o,"Port");if(p.port<1024||p.port>65531)p.port=45900;p.pass=dpapi_unprotect(json_field_string(o,"ProtectedPassword").value_or(""));if(!p.host.empty())out.push_back(std::move(p));}}
+    return out;
+}
+static void save_profiles(const std::vector<Profile>& ps){
+    std::ofstream f(app_dir()/L"viewer.json",std::ios::binary|std::ios::trunc);f<<"[\n";
+    for(size_t i=0;i<ps.size();i++){auto&p=ps[i];if(i)f<<",\n";auto prot=dpapi_protect(p.pass);f<<"  {\n    \"Id\": \""<<json_escape(p.id)<<"\",\n    \"HostId\": \""<<json_escape(p.hostid)<<"\",\n    \"Name\": \""<<json_escape(p.name)<<"\",\n    \"Host\": \""<<json_escape(p.host)<<"\",\n    \"Port\": "<<p.port<<",\n    \"ProtectedPassword\": \""<<json_escape(prot)<<"\"\n  }";}
+    f<<"\n]\n";
+}
+static std::filesystem::path thumb_dir(){auto p=app_dir()/L"thumbnails";ensure_dir(p);return p;}
+static std::filesystem::path thumb_path(std::string_view id){return thumb_dir()/(u8w(std::string(id))+L".jpg");}
+static bool fetch_preview(const Profile&p){
+    try{
+        Sock s=connect_tcp(p.host,p.port+2,5000);if(!s)return false;auto k=auth_client(s.s,p.pass);Channel ch(s.s,k,VIEWER_PREFIX,HOST_PREFIX);auto q=ch.recv();if(!q||q->type!=pkt::Preview||q->payload.size()<=8)return false;
+        std::ofstream f(thumb_path(p.id),std::ios::binary|std::ios::trunc);f.write((char*)q->payload.data()+8,(std::streamsize)q->payload.size()-8);return(bool)f;
+    }catch(...){return false;}
+}
+static HBITMAP load_image_file(const std::filesystem::path&p){
+    if(!std::filesystem::exists(p))return nullptr;Gdiplus::Bitmap im(p.c_str());if(im.GetLastStatus()!=Gdiplus::Ok)return nullptr;HBITMAP h{};if(im.GetHBITMAP(Gdiplus::Color(0,0,0),&h)!=Gdiplus::Ok)return nullptr;return h;
+}
+
 struct AudioFmt { int rate=48000,bits=16,channels=2,encoding=1; };
 
 static bool wave_is_float(WAVEFORMATEX* f){

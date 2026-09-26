@@ -4,6 +4,9 @@
 #include <windowsx.h>
 #include <bcrypt.h>
 #include <wincrypt.h>
+#include <objidl.h>
+#include <propidl.h>
+#include <ole2.h>
 #include <gdiplus.h>
 #include <shellapi.h>
 #include <shlobj.h>

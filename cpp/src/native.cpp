@@ -664,7 +664,7 @@ static LRESULT CALLBACK profileproc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_NCCREATE:{auto*cs=(CREATESTRUCTW*)l;SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)cs->lpCreateParams);return TRUE;}
     case WM_CREATE:{
         c=(ProfileDlgCtx*)((CREATESTRUCTW*)l)->lpCreateParams;dark_title(h);
-        auto mk=[&](LPCWSTR cls,LPCWSTR text,DWORD style,int x,int y,int ww,int hh,int id){HWND q=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|style,x,y,ww,hh,h,(HMENU)(INT_PTR)id,GH,nullptr);SendMessageW(q,WM_SETFONT,(WPARAM)(HFONT)GetStockObject(DEFAULT_GUI_FONT),TRUE);return q;};
+        auto mk=[&](LPCWSTR cls,LPCWSTR text,DWORD style,int x,int y,int ww,int hh,int id){HWND q=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|style,x,y,ww,hh,h,(HMENU)(INT_PTR)id,GetModuleHandleW(nullptr),nullptr);SendMessageW(q,WM_SETFONT,(WPARAM)(HFONT)GetStockObject(DEFAULT_GUI_FONT),TRUE);return q;};
         c->name=mk(L"EDIT",u8w(c->p->name).c_str(),WS_BORDER|ES_AUTOHSCROLL,174,130,390,38,501);
         c->host=mk(L"EDIT",u8w(c->p->host).c_str(),WS_BORDER|ES_AUTOHSCROLL,174,184,390,38,502);
         c->port=mk(L"EDIT",std::to_wstring(c->p->port).c_str(),WS_BORDER|ES_NUMBER,174,238,210,38,503);
@@ -693,9 +693,9 @@ static LRESULT CALLBACK profileproc(HWND h,UINT m,WPARAM w,LPARAM l){
 }
 static bool edit_profile(HWND owner,Profile&p,bool isNew){
     ProfileDlgCtx c{&p,isNew,false};RECT orc{};GetWindowRect(owner,&orc);int ww=620,hh=540,x=orc.left+(orc.right-orc.left-ww)/2,y=orc.top+(orc.bottom-orc.top-hh)/2;
-    HWND h=CreateWindowExW(WS_EX_DLGMODALFRAME|WS_EX_CONTROLPARENT,L"SRD.Native.Profile",isNew?L"Добавить компьютер":L"Параметры подключения",WS_POPUP|WS_CAPTION|WS_SYSMENU,x,y,ww,hh,owner,nullptr,GH,&c);
+    HWND h=CreateWindowExW(WS_EX_DLGMODALFRAME|WS_EX_CONTROLPARENT,L"SRD.Native.Profile",isNew?L"Добавить компьютер":L"Параметры подключения",WS_POPUP|WS_CAPTION|WS_SYSMENU,x,y,ww,hh,owner,nullptr,GetModuleHandleW(nullptr),&c);
     if(!h)return false;EnableWindow(owner,FALSE);ShowWindow(h,SW_SHOW);UpdateWindow(h);MSG msg;
-    while(IsWindow(h)&&GetMessageW(&msg,nullptr,0)>0){if(!IsDialogMessageW(h,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
+    while(IsWindow(h)&&GetMessageW(&msg,nullptr,0,0)>0){if(!IsDialogMessageW(h,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
     EnableWindow(owner,TRUE);SetForegroundWindow(owner);return c.accepted;
 }
 enum class HitAction{AddTop,Connect,Edit,Delete,AddSeen,Refresh,Disconnect};
@@ -872,7 +872,7 @@ static LRESULT CALLBACK viewproc(HWND h,UINT m,WPARAM w,LPARAM l){
         txt(dc,L"Мои компьютеры",{margin,150,420,190},C_TEXT,GAPP->f15);
 
         std::vector<Profile> profs;{std::lock_guard lk(GAPP->pm);profs=GAPP->profiles;}
-        int cols=std::max(1,std::min(3,(cr.right-2*margin+16)/410));int gap=16;int cw=(cr.right-2*margin-(cols-1)*gap)/cols;cw=std::max(330,cw);int ch=300,y0=194;
+        int cols=std::clamp((int)((cr.right-2*margin+16)/410),1,3);int gap=16;int cw=(cr.right-2*margin-(cols-1)*gap)/cols;cw=std::max(330,cw);int ch=300,y0=194;
         int rows=profs.empty()?0:(int)((profs.size()+cols-1)/cols);
         for(int i=0;i<(int)profs.size();i++){
             int col=i%cols,row=i/cols,x=margin+col*(cw+gap),y=y0+row*(ch+gap);if(y+ch>cr.bottom-120)break;RECT card{x,y,x+cw,y+ch};roundbox(dc,card,C_SURFACE,C_BORDER_SOFT,13);

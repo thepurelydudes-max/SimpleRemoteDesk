@@ -14,6 +14,13 @@
 #include <iphlpapi.h>
 #include <commctrl.h>
 #include <dwmapi.h>
+#include <mmdeviceapi.h>
+#include <audioclient.h>
+#include <mmsystem.h>
+#include <ks.h>
+#include <ksmedia.h>
+#include <wrl/client.h>
+#include <cmath>
 
 #include <algorithm>
 #include <array>
@@ -30,6 +37,7 @@
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <regex>
 #include <span>
 #include <sstream>
 #include <stdexcept>
@@ -214,6 +222,124 @@ static bool extractb(std::string_view j,std::string_view k,bool def){auto p=j.fi
 static Config load_cfg(){Config c;auto p=app_dir()/L"native-host.json";std::ifstream f(p,std::ios::binary);if(f){std::stringstream ss;ss<<f.rdbuf();auto j=ss.str();c.port=extracti(j,"port",45900);c.fps=extracti(j,"fps",30);c.quality=extracti(j,"quality",95);c.audio=extractb(j,"audio",true);c.autostart=extractb(j,"autostart",false);c.password=extract(j,"password","123456");c.hostid=extract(j,"hostid","");}if(c.hostid.empty())c.hostid=rndhex();return c;}
 static void save_cfg(const Config&c){std::ofstream f(app_dir()/L"native-host.json",std::ios::binary|std::ios::trunc);f<<"{\"port\":"<<c.port<<",\"fps\":"<<c.fps<<",\"quality\":"<<c.quality<<",\"audio\":"<<(c.audio?"true":"false")<<",\"autostart\":"<<(c.autostart?"true":"false")<<",\"password\":\""<<c.password<<"\",\"hostid\":\""<<c.hostid<<"\"}";}
 
+
+using Microsoft::WRL::ComPtr;
+
+struct AudioFmt { int rate=48000,bits=16,channels=2,encoding=1; };
+
+static bool wave_is_float(WAVEFORMATEX* f){
+    if(!f) return false;
+    if(f->wFormatTag==WAVE_FORMAT_IEEE_FLOAT) return true;
+    if(f->wFormatTag==WAVE_FORMAT_EXTENSIBLE){
+        auto* e=reinterpret_cast<WAVEFORMATEXTENSIBLE*>(f);
+        return IsEqualGUID(e->SubFormat,KSDATAFORMAT_SUBTYPE_IEEE_FLOAT);
+    }
+    return false;
+}
+static bool wave_is_pcm(WAVEFORMATEX* f){
+    if(!f) return false;
+    if(f->wFormatTag==WAVE_FORMAT_PCM) return true;
+    if(f->wFormatTag==WAVE_FORMAT_EXTENSIBLE){
+        auto* e=reinterpret_cast<WAVEFORMATEXTENSIBLE*>(f);
+        return IsEqualGUID(e->SubFormat,KSDATAFORMAT_SUBTYPE_PCM);
+    }
+    return false;
+}
+
+class LoopbackCapture {
+    std::jthread th_;
+    std::atomic<bool> run_{false};
+public:
+    ~LoopbackCapture(){ stop(); }
+    bool start(std::function<void(AudioFmt)> onfmt,std::function<void(std::span<const byte>)> ondata){
+        if(run_.exchange(true)) return true;
+        th_=std::jthread([this,onfmt=std::move(onfmt),ondata=std::move(ondata)](std::stop_token st){
+            CoInitializeEx(nullptr,COINIT_MULTITHREADED);
+            ComPtr<IMMDeviceEnumerator> en; ComPtr<IMMDevice> dev; ComPtr<IAudioClient> ac; ComPtr<IAudioCaptureClient> cap;
+            WAVEFORMATEX* wf=nullptr;
+            try{
+                if(FAILED(CoCreateInstance(__uuidof(MMDeviceEnumerator),nullptr,CLSCTX_ALL,IID_PPV_ARGS(&en)))) throw 1;
+                if(FAILED(en->GetDefaultAudioEndpoint(eRender,eMultimedia,&dev))) throw 2;
+                if(FAILED(dev.As(&ac))) throw 3;
+                if(FAILED(ac->GetMixFormat(&wf))) throw 4;
+                AudioFmt fmt{(int)wf->nSamplesPerSec,16,(int)wf->nChannels,1};
+                if(onfmt) onfmt(fmt);
+                if(FAILED(ac->Initialize(AUDCLNT_SHAREMODE_SHARED,AUDCLNT_STREAMFLAGS_LOOPBACK,1000000,0,wf,nullptr))) throw 5;
+                if(FAILED(ac->GetService(IID_PPV_ARGS(&cap)))) throw 6;
+                if(FAILED(ac->Start())) throw 7;
+                std::vector<byte> out;
+                while(run_&&!st.stop_requested()){
+                    UINT32 packets=0;
+                    if(FAILED(cap->GetNextPacketSize(&packets))) break;
+                    if(!packets){ Sleep(4); continue; }
+                    while(packets){
+                        BYTE* data=nullptr; UINT32 frames=0; DWORD flags=0;
+                        if(FAILED(cap->GetBuffer(&data,&frames,&flags,nullptr,nullptr))) break;
+                        size_t samples=(size_t)frames*wf->nChannels;
+                        out.resize(samples*2); short* dst=(short*)out.data();
+                        if(flags&AUDCLNT_BUFFERFLAGS_SILENT) std::fill(dst,dst+samples,0);
+                        else if(wave_is_float(wf)&&wf->wBitsPerSample==32){
+                            float* src=(float*)data;
+                            for(size_t i=0;i<samples;i++){float x=std::clamp(src[i],-1.0f,1.0f);dst[i]=(short)std::lrintf(x*32767.0f);}
+                        }else if(wave_is_pcm(wf)&&wf->wBitsPerSample==16) memcpy(dst,data,samples*2);
+                        else if(wave_is_pcm(wf)&&wf->wBitsPerSample==24){
+                            for(size_t i=0;i<samples;i++){BYTE* p=data+i*3;int x=p[0]|(p[1]<<8)|(p[2]<<16);if(x&0x800000)x|=0xff000000;dst[i]=(short)(x>>8);}
+                        }else if(wave_is_pcm(wf)&&wf->wBitsPerSample==32){
+                            int* src=(int*)data;for(size_t i=0;i<samples;i++)dst[i]=(short)(src[i]>>16);
+                        }else std::fill(dst,dst+samples,0);
+                        cap->ReleaseBuffer(frames);
+                        if(ondata&&!out.empty()) ondata(out);
+                        if(FAILED(cap->GetNextPacketSize(&packets))) break;
+                    }
+                }
+                ac->Stop();
+            }catch(...){ log_line(L"WASAPI loopback stopped"); }
+            if(wf) CoTaskMemFree(wf);
+            run_=false; CoUninitialize();
+        });
+        return true;
+    }
+    void stop(){run_=false;if(th_.joinable()){th_.request_stop();th_.join();}}
+};
+
+struct WaveBlock { WAVEHDR h{}; std::vector<byte> data; explicit WaveBlock(size_t n=131072):data(n){} };
+class WavePlayer {
+    HWAVEOUT out_{}; WAVEFORMATEX fmt_{}; std::mutex mu_;
+    std::deque<std::unique_ptr<WaveBlock>> free_,used_;
+    static void CALLBACK done(HWAVEOUT,UINT msg,DWORD_PTR self,DWORD_PTR p,DWORD_PTR){
+        if(msg==WOM_DONE&&self) reinterpret_cast<WavePlayer*>(self)->recycle((WAVEHDR*)p);
+    }
+    void recycle(WAVEHDR* h){
+        std::lock_guard lk(mu_);
+        for(auto it=used_.begin();it!=used_.end();++it) if(&(*it)->h==h){
+            waveOutUnprepareHeader(out_,h,sizeof(WAVEHDR));free_.push_back(std::move(*it));used_.erase(it);break;
+        }
+    }
+public:
+    ~WavePlayer(){close();}
+    bool configure(AudioFmt f){
+        close(); ZeroMemory(&fmt_,sizeof(fmt_));
+        fmt_.wFormatTag=WAVE_FORMAT_PCM;fmt_.nChannels=(WORD)f.channels;fmt_.nSamplesPerSec=f.rate;fmt_.wBitsPerSample=16;
+        fmt_.nBlockAlign=fmt_.nChannels*2;fmt_.nAvgBytesPerSec=fmt_.nSamplesPerSec*fmt_.nBlockAlign;
+        if(waveOutOpen(&out_,WAVE_MAPPER,&fmt_,(DWORD_PTR)&done,(DWORD_PTR)this,CALLBACK_FUNCTION)!=MMSYSERR_NOERROR){out_=nullptr;return false;}
+        for(int i=0;i<12;i++) free_.push_back(std::make_unique<WaveBlock>());
+        return true;
+    }
+    void push(std::span<const byte> d){
+        if(!out_||d.empty())return;std::unique_ptr<WaveBlock>b;
+        {std::lock_guard lk(mu_);if(free_.empty())return;b=std::move(free_.front());free_.pop_front();}
+        size_t n=std::min(d.size(),b->data.size());memcpy(b->data.data(),d.data(),n);ZeroMemory(&b->h,sizeof b->h);b->h.lpData=(LPSTR)b->data.data();b->h.dwBufferLength=(DWORD)n;
+        if(waveOutPrepareHeader(out_,&b->h,sizeof(WAVEHDR))!=MMSYSERR_NOERROR){std::lock_guard lk(mu_);free_.push_back(std::move(b));return;}
+        auto* raw=b.get();{std::lock_guard lk(mu_);used_.push_back(std::move(b));}
+        if(waveOutWrite(out_,&raw->h,sizeof(WAVEHDR))!=MMSYSERR_NOERROR) recycle(&raw->h);
+    }
+    void close(){
+        if(!out_)return;waveOutReset(out_);Sleep(10);
+        {std::lock_guard lk(mu_);for(auto&b:used_)waveOutUnprepareHeader(out_,&b->h,sizeof(WAVEHDR));used_.clear();free_.clear();}
+        waveOutClose(out_);out_=nullptr;
+    }
+};
+
 struct Seen{std::string id,name,ip;int port;Clock::time_point t;};
 class Discovery{
     std::jthread tx_,rx_;std::atomic<bool>run_{false};int port_;std::string id_;std::mutex mu_;std::vector<Seen>seen_;
@@ -236,8 +362,27 @@ class HostServer{
     void data(Sock c){try{auto k=auth_server(c.s,cfg_.password);{std::lock_guard lk(sm_);if(session_)return;session_=true;sip_=peer_ip(c.s);ds_=c.s;}Channel ch(c.s,k,HOST_PREFIX,VIEWER_PREFIX);Capture cap(cfg_.quality);std::array<byte,8>d{};le32(d.data(),cap.w());le32(d.data()+4,cap.h());byte old=255;std::vector<byte>j;auto interval=std::chrono::microseconds(1000000/std::clamp(cfg_.fps,1,60));auto next=Clock::now();while(run_&&session_){if(!cap.jpeg(j))break;auto cur=cursor_kind();if(cur!=old){if(!ch.send(pkt::Cursor,std::span<const byte>(&cur,1)))break;old=cur;}if(!ch.send2(pkt::Screen,d,j))break;next+=interval;auto now=Clock::now();if(next>now)std::this_thread::sleep_until(next);else next=now;}}catch(...){log_line(L"data channel closed");}end();}
     void control(Sock c){auto ip=peer_ip(c.s);if(!wait_ip(ip))return;try{auto k=auth_server(c.s,cfg_.password);{std::lock_guard lk(sm_);cs_=c.s;}Channel ch(c.s,k,HOST_PREFIX,VIEWER_PREFIX);while(run_&&session_){auto p=ch.recv();if(!p)break;auto&b=p->payload;if(p->type==pkt::MouseMove&&b.size()>=8)mouse_move(rd32(b.data()),rd32(b.data()+4));else if(p->type==pkt::MouseButton&&b.size()>=2)mouse_button(b[0],b[1]!=0);else if(p->type==pkt::MouseWheel&&b.size()>=4)mouse_wheel(rd32(b.data()));else if(p->type==pkt::Key&&b.size()>=5)key_event(rd32(b.data()),b[4]!=0);else if(p->type==pkt::KeyCombination&&b.size()>=4){int n=rd32(b.data());if(n>0&&n<=16&&b.size()>=(size_t)(4+n*4)){std::vector<int>keys(n);for(int i=0;i<n;i++)keys[i]=rd32(b.data()+4+i*4);for(int v:keys)key_event(v,true);for(auto it=keys.rbegin();it!=keys.rend();++it)key_event(*it,false);}}}}catch(...){log_line(L"control channel closed");}end();}
     void preview(Sock c){try{auto k=auth_server(c.s,cfg_.password);Channel ch(c.s,k,HOST_PREFIX,VIEWER_PREFIX);Capture cap(70);std::vector<byte>j;if(cap.jpeg(j)){std::array<byte,8>d{};le32(d.data(),cap.w());le32(d.data()+4,cap.h());ch.send2(pkt::Preview,d,j);}}catch(...){}}
-    void discard_auth(Sock c){try{(void)auth_server(c.s,cfg_.password);Sleep(100);}catch(...){}}
-    void acceptor(int i){while(run_){sockaddr_storage a{};int z=sizeof(a);SOCKET x=accept(ls_[i].s,(sockaddr*)&a,&z);if(x==INVALID_SOCKET){if(run_)Sleep(50);continue;}tcp_opts(x);Sock c(x);if(i==0)std::thread([this,c=std::move(c)]()mutable{data(std::move(c));}).detach();else if(i==1)std::thread([this,c=std::move(c)]()mutable{control(std::move(c));}).detach();else if(i==2)std::thread([this,c=std::move(c)]()mutable{preview(std::move(c));}).detach();else std::thread([this,c=std::move(c)]()mutable{discard_auth(std::move(c));}).detach();}}
+    void audio(Sock c){
+        auto ip=peer_ip(c.s);if(!wait_ip(ip))return;
+        try{
+            auto k=auth_server(c.s,cfg_.password);Channel ch(c.s,k,HOST_PREFIX,VIEWER_PREFIX);
+            if(!cfg_.audio){while(run_&&session_)Sleep(200);return;}
+            std::mutex qmu;std::condition_variable cv;std::deque<std::vector<byte>>q;AudioFmt fmt{};std::atomic<bool>fmtready{false};
+            LoopbackCapture cap;
+            cap.start([&](AudioFmt f){fmt=f;fmtready=true;cv.notify_one();},[&](std::span<const byte>d){std::lock_guard lk(qmu);if(q.size()>=32)q.pop_front();q.emplace_back(d.begin(),d.end());cv.notify_one();});
+            for(int n=0;n<100&&!fmtready&&run_&&session_;n++)Sleep(10);
+            if(fmtready){
+                std::array<byte,16>p{};le32(p.data(),fmt.rate);le32(p.data()+4,fmt.bits);le32(p.data()+8,fmt.channels);le32(p.data()+12,fmt.encoding);
+                if(!ch.send(pkt::AudioFormat,p)){cap.stop();return;}
+            }
+            while(run_&&session_){
+                std::vector<byte>b;{std::unique_lock lk(qmu);cv.wait_for(lk,std::chrono::milliseconds(100),[&]{return!q.empty()||!run_||!session_;});if(!q.empty()){b=std::move(q.front());q.pop_front();}}
+                if(!b.empty()&&!ch.send(pkt::Audio,b))break;
+            }
+            cap.stop();
+        }catch(...){log_line(L"audio channel closed");}
+    }
+    void acceptor(int i){while(run_){sockaddr_storage a{};int z=sizeof(a);SOCKET x=accept(ls_[i].s,(sockaddr*)&a,&z);if(x==INVALID_SOCKET){if(run_)Sleep(50);continue;}tcp_opts(x);Sock c(x);if(i==0)std::thread([this,c=std::move(c)]()mutable{data(std::move(c));}).detach();else if(i==1)std::thread([this,c=std::move(c)]()mutable{control(std::move(c));}).detach();else if(i==2)std::thread([this,c=std::move(c)]()mutable{preview(std::move(c));}).detach();else if(i==3)std::thread([this,c=std::move(c)]()mutable{audio(std::move(c));}).detach();else std::thread([this,c=std::move(c)]()mutable{try{(void)auth_server(c.s,cfg_.password);}catch(...){}}).detach();}}
 public:
     explicit HostServer(Config c):cfg_(std::move(c)){}
     ~HostServer(){stop();}
@@ -247,14 +392,17 @@ public:
 };
 
 class Client{
-    Sock data_,ctrl_;std::unique_ptr<Channel>dc_,cc_;std::vector<std::jthread>ths_;std::atomic<bool>run_{false};std::mutex qm_;std::condition_variable_any qcv_;struct M{byte t;std::vector<byte>p;};std::deque<M>q_;std::atomic<int>mx_{},my_{};std::atomic<bool>mp_{false};
+    Sock data_,ctrl_,audio_;std::unique_ptr<Channel>dc_,cc_,ac_;std::vector<std::jthread>ths_;std::atomic<bool>run_{false};std::mutex qm_;std::condition_variable_any qcv_;struct M{byte t;std::vector<byte>p;};std::deque<M>q_;std::atomic<int>mx_{},my_{};std::atomic<bool>mp_{false};WavePlayer player_;
     void rx(std::stop_token st){while(run_&&!st.stop_requested()){auto p=dc_->recv();if(!p)break;if(p->type==pkt::Screen&&p->payload.size()>8&&on_frame){int w=rd32(p->payload.data()),h=rd32(p->payload.data()+4);std::vector<byte>j(p->payload.begin()+8,p->payload.end());on_frame(std::move(j),w,h);}else if(p->type==pkt::Cursor&&!p->payload.empty())cursor=p->payload[0];}run_=false;if(on_close)on_close();}
     void tx(std::stop_token st){while(run_&&!st.stop_requested()){M m;bool has=false;{std::unique_lock lk(qm_);qcv_.wait_for(lk,st,std::chrono::milliseconds(30),[&]{return!q_.empty()||mp_.load()||!run_;});if(!q_.empty()){m=std::move(q_.front());q_.pop_front();has=true;}}if(has&&!cc_->send(m.t,m.p))break;if(mp_.exchange(false)){std::array<byte,8>p{};le32(p.data(),mx_);le32(p.data()+4,my_);if(!cc_->send(pkt::MouseMove,p))break;}}}
+    void arx(std::stop_token st){while(run_&&!st.stop_requested()&&ac_){auto p=ac_->recv();if(!p)break;if(p->type==pkt::AudioFormat&&p->payload.size()>=16){AudioFmt f{rd32(p->payload.data()),rd32(p->payload.data()+4),rd32(p->payload.data()+8),rd32(p->payload.data()+12)};player_.configure(f);}else if(p->type==pkt::Audio)player_.push(p->payload);}}
 public:
     byte cursor=1;std::function<void(std::vector<byte>,int,int)>on_frame;std::function<void()>on_close;
     ~Client(){close();}
-    bool open(std::string host,int port,std::string pass){try{data_=connect_tcp(host,port);if(!data_)return false;auto dk=auth_client(data_.s,pass);dc_=std::make_unique<Channel>(data_.s,dk,VIEWER_PREFIX,HOST_PREFIX);ctrl_=connect_tcp(host,port+1);if(!ctrl_)return false;auto ck=auth_client(ctrl_.s,pass);cc_=std::make_unique<Channel>(ctrl_.s,ck,VIEWER_PREFIX,HOST_PREFIX);run_=true;ths_.emplace_back([this](std::stop_token s){rx(s);});ths_.emplace_back([this](std::stop_token s){tx(s);});return true;}catch(...){close();return false;}}
-    void close(){bool was=run_.exchange(false);data_.close();ctrl_.close();qcv_.notify_all();for(auto&t:ths_)if(t.joinable()){t.request_stop();if(t.get_id()!=std::this_thread::get_id())t.join();else t.detach();}ths_.clear();dc_.reset();cc_.reset();if(was){}}
+    bool open(std::string host,int port,std::string pass){try{data_=connect_tcp(host,port);if(!data_)return false;auto dk=auth_client(data_.s,pass);dc_=std::make_unique<Channel>(data_.s,dk,VIEWER_PREFIX,HOST_PREFIX);ctrl_=connect_tcp(host,port+1);if(!ctrl_)return false;auto ck=auth_client(ctrl_.s,pass);cc_=std::make_unique<Channel>(ctrl_.s,ck,VIEWER_PREFIX,HOST_PREFIX);
+      audio_=connect_tcp(host,port+3,2500);if(audio_){try{auto ak=auth_client(audio_.s,pass);ac_=std::make_unique<Channel>(audio_.s,ak,VIEWER_PREFIX,HOST_PREFIX);}catch(...){audio_.close();ac_.reset();}}
+      run_=true;ths_.emplace_back([this](std::stop_token s){rx(s);});ths_.emplace_back([this](std::stop_token s){tx(s);});if(ac_)ths_.emplace_back([this](std::stop_token s){arx(s);});return true;}catch(...){close();return false;}}
+    void close(){bool was=run_.exchange(false);data_.close();ctrl_.close();audio_.close();qcv_.notify_all();for(auto&t:ths_)if(t.joinable()){t.request_stop();if(t.get_id()!=std::this_thread::get_id())t.join();else t.detach();}ths_.clear();dc_.reset();cc_.reset();ac_.reset();player_.close();if(was){}}
     bool running()const{return run_;}
     void mm(int x,int y){mx_=x;my_=y;mp_=true;qcv_.notify_one();}
     void mb(byte b,bool d){std::lock_guard lk(qm_);q_.push_back({pkt::MouseButton,{b,(byte)(d?1:0)}});qcv_.notify_one();}

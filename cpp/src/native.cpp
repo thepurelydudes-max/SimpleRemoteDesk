@@ -641,6 +641,67 @@ static void fill(HDC dc,const RECT&r,COLORREF c){HBRUSH b=CreateSolidBrush(c);Fi
 static void txt(HDC dc,const wchar_t*s,RECT r,COLORREF c,HFONT f,UINT fmt=DT_LEFT|DT_VCENTER|DT_SINGLELINE){SetBkMode(dc,TRANSPARENT);SetTextColor(dc,c);auto o=SelectObject(dc,f);DrawTextW(dc,s,-1,&r,fmt);SelectObject(dc,o);}
 static void roundbox(HDC dc,RECT r,COLORREF c,COLORREF border,int rad=14){HBRUSH b=CreateSolidBrush(c);HPEN p=CreatePen(PS_SOLID,1,border);auto ob=SelectObject(dc,b),op=SelectObject(dc,p);RoundRect(dc,r.left,r.top,r.right,r.bottom,rad,rad);SelectObject(dc,op);SelectObject(dc,ob);DeleteObject(p);DeleteObject(b);}
 
+
+
+static HBRUSH surface2_brush(){static HBRUSH b=CreateSolidBrush(C_SURFACE2);return b;}
+static void draw_owner_button(const DRAWITEMSTRUCT* di,bool primary=false,bool danger=false){
+    RECT r=di->rcItem;bool pressed=(di->itemState&ODS_SELECTED)!=0;
+    COLORREF bg=danger?(pressed?RGB(211,68,82):C_DANGER):(primary?(pressed?RGB(14,106,224):C_ACCENT):(pressed?RGB(20,41,68):C_SURFACE3));
+    COLORREF br=primary||danger?bg:C_BORDER;fill(di->hDC,r,C_BG);roundbox(di->hDC,r,bg,br,10);
+    wchar_t t[256]{};GetWindowTextW(di->hwndItem,t,255);HFONT f=(HFONT)SendMessageW(di->hwndItem,WM_GETFONT,0,0);
+    txt(di->hDC,t,r,C_TEXT,f,DT_CENTER|DT_VCENTER|DT_SINGLELINE);
+}
+static void draw_monitor(HDC dc,int x,int y,int w,int h,COLORREF c=C_MUTED){
+    HPEN p=CreatePen(PS_SOLID,2,c);auto op=SelectObject(dc,p);HBRUSH b=(HBRUSH)GetStockObject(NULL_BRUSH);auto ob=SelectObject(dc,b);
+    RoundRect(dc,x,y,x+w,y+h,4,4);MoveToEx(dc,x+w/2,y+h,nullptr);LineTo(dc,x+w/2,y+h+6);MoveToEx(dc,x+w/2-8,y+h+6,nullptr);LineTo(dc,x+w/2+8,y+h+6);
+    SelectObject(dc,ob);SelectObject(dc,op);DeleteObject(p);
+}
+struct ProfileDlgCtx{Profile* p{};bool isNew{},accepted{};HWND name{},host{},port{},pass{},show{};};
+static std::wstring ctl_text(HWND h){int n=GetWindowTextLengthW(h);std::wstring w(n,L'\0');if(n)GetWindowTextW(h,w.data(),n+1);return w;}
+static LRESULT CALLBACK profileproc(HWND h,UINT m,WPARAM w,LPARAM l){
+    auto* c=(ProfileDlgCtx*)GetWindowLongPtrW(h,GWLP_USERDATA);
+    switch(m){
+    case WM_NCCREATE:{auto*cs=(CREATESTRUCTW*)l;SetWindowLongPtrW(h,GWLP_USERDATA,(LONG_PTR)cs->lpCreateParams);return TRUE;}
+    case WM_CREATE:{
+        c=(ProfileDlgCtx*)((CREATESTRUCTW*)l)->lpCreateParams;dark_title(h);
+        auto mk=[&](LPCWSTR cls,LPCWSTR text,DWORD style,int x,int y,int ww,int hh,int id){HWND q=CreateWindowExW(0,cls,text,WS_CHILD|WS_VISIBLE|style,x,y,ww,hh,h,(HMENU)(INT_PTR)id,GH,nullptr);SendMessageW(q,WM_SETFONT,(WPARAM)(HFONT)GetStockObject(DEFAULT_GUI_FONT),TRUE);return q;};
+        c->name=mk(L"EDIT",u8w(c->p->name).c_str(),WS_BORDER|ES_AUTOHSCROLL,174,130,390,38,501);
+        c->host=mk(L"EDIT",u8w(c->p->host).c_str(),WS_BORDER|ES_AUTOHSCROLL,174,184,390,38,502);
+        c->port=mk(L"EDIT",std::to_wstring(c->p->port).c_str(),WS_BORDER|ES_NUMBER,174,238,210,38,503);
+        c->pass=mk(L"EDIT",u8w(c->p->pass).c_str(),WS_BORDER|ES_PASSWORD|ES_AUTOHSCROLL,174,292,390,38,504);
+        c->show=mk(L"BUTTON",L"Показать пароль",BS_AUTOCHECKBOX,174,340,190,30,505);
+        mk(L"BUTTON",c->isNew?L"Добавить":L"Сохранить",BS_OWNERDRAW,216,406,156,48,1);
+        mk(L"BUTTON",L"Отмена",BS_OWNERDRAW,384,406,156,48,2);
+        return 0;
+    }
+    case WM_COMMAND:
+        if(!c)break;
+        if(LOWORD(w)==505){bool on=SendMessageW(c->show,BM_GETCHECK,0,0)==BST_CHECKED;SendMessageW(c->pass,EM_SETPASSWORDCHAR,on?0:L'●',0);InvalidateRect(c->pass,nullptr,TRUE);return 0;}
+        if(LOWORD(w)==1){
+            auto name=ctl_text(c->name),host=ctl_text(c->host),pass=ctl_text(c->pass);int port=0;try{port=std::stoi(ctl_text(c->port));}catch(...){}
+            if(name.empty()||host.empty()||pass.size()<6||port<1024||port>65531){MessageBoxW(h,L"Укажите название, адрес, порт 1024–65531 и пароль не короче 6 символов.",L"Параметры подключения",MB_ICONINFORMATION);return 0;}
+            c->p->name=wu8(name);c->p->host=wu8(host);c->p->port=port;c->p->pass=wu8(pass);if(c->p->id.empty())c->p->id=rndhex();c->accepted=true;DestroyWindow(h);return 0;
+        }
+        if(LOWORD(w)==2){DestroyWindow(h);return 0;}break;
+    case WM_DRAWITEM:{auto*di=(DRAWITEMSTRUCT*)l;draw_owner_button(di,di->CtlID==1,false);return TRUE;}
+    case WM_CTLCOLOREDIT:{HDC dc=(HDC)w;SetTextColor(dc,C_TEXT);SetBkColor(dc,C_SURFACE2);return(LRESULT)surface2_brush();}
+    case WM_CTLCOLORSTATIC:{HDC dc=(HDC)w;SetTextColor(dc,C_MUTED);SetBkMode(dc,TRANSPARENT);return(LRESULT)GetStockObject(NULL_BRUSH);}
+    case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT cr;GetClientRect(h,&cr);fill(dc,cr,C_BG);fill(dc,{0,0,cr.right,96},C_HEADER);draw_monitor(dc,26,27,42,34,C_ACCENT);txt(dc,c&&c->isNew?L"Добавить компьютер":L"Параметры подключения",{86,18,520,50},C_TEXT,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Укажите адрес Host и пароль доступа",{86,51,540,78},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));roundbox(dc,{24,108,cr.right-24,478},C_SURFACE,C_BORDER,14);
+        txt(dc,L"Название",{52,128,160,166},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"IP / Host",{52,182,160,220},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Базовый порт",{52,236,160,274},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Пароль",{52,290,160,328},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));EndPaint(h,&ps);return 0;}
+    case WM_CLOSE:DestroyWindow(h);return 0;
+    }return DefWindowProcW(h,m,w,l);
+}
+static bool edit_profile(HWND owner,Profile&p,bool isNew){
+    ProfileDlgCtx c{&p,isNew,false};RECT orc{};GetWindowRect(owner,&orc);int ww=620,hh=540,x=orc.left+(orc.right-orc.left-ww)/2,y=orc.top+(orc.bottom-orc.top-hh)/2;
+    HWND h=CreateWindowExW(WS_EX_DLGMODALFRAME|WS_EX_CONTROLPARENT,L"SRD.Native.Profile",isNew?L"Добавить компьютер":L"Параметры подключения",WS_POPUP|WS_CAPTION|WS_SYSMENU,x,y,ww,hh,owner,nullptr,GH,&c);
+    if(!h)return false;EnableWindow(owner,FALSE);ShowWindow(h,SW_SHOW);UpdateWindow(h);MSG msg;
+    while(IsWindow(h)&&GetMessageW(&msg,nullptr,0)>0){if(!IsDialogMessageW(h,&msg)){TranslateMessage(&msg);DispatchMessageW(&msg);}}
+    EnableWindow(owner,TRUE);SetForegroundWindow(owner);return c.accepted;
+}
+enum class HitAction{AddTop,Connect,Edit,Delete,AddSeen,Refresh,Disconnect};
+struct ViewHit{RECT r{};HitAction action{};int index=-1;std::string id;};
+static bool in_rect(RECT r,POINT p){return p.x>=r.left&&p.x<r.right&&p.y>=r.top&&p.y<r.bottom;}
+
 static HINSTANCE GH;static constexpr UINT WM_TRAY=WM_APP+10, WM_FRAME=WM_APP+11, WM_SEEN=WM_APP+12;
 class App;
 static App* GAPP=nullptr;
@@ -648,7 +709,7 @@ static App* GAPP=nullptr;
 class App{
 public:
     Config cfg=load_cfg();std::atomic<bool> file_busy{false};std::unique_ptr<HostServer>host;std::unique_ptr<Discovery>disc;std::unique_ptr<Client>client;HWND hw_host{},hw_view{};NOTIFYICONDATAW tray{};HICON icon{};HFONT f9{},f10{},f12{},f15{};std::mutex fm;HBITMAP frame{};int fw{},fh{};std::string target_ip;int target_port=45900;std::string target_pass="123456";
-    App(){f9=mkfont(9);f10=mkfont(10);f12=mkfont(12,true);f15=mkfont(15,true);icon=(HICON)LoadImageW(GH,MAKEINTRESOURCEW(1),IMAGE_ICON,32,32,LR_DEFAULTCOLOR);host=std::make_unique<HostServer>(cfg);host->start();disc=std::make_unique<Discovery>(cfg.port,cfg.hostid);disc->start();}
+    App(){f9=mkfont(9);f10=(HFONT)GetStockObject(DEFAULT_GUI_FONT);f12=mkfont(12,true);f15=(HFONT)GetStockObject(DEFAULT_GUI_FONT);icon=(HICON)LoadImageW(GH,MAKEINTRESOURCEW(1),IMAGE_ICON,32,32,LR_DEFAULTCOLOR);host=std::make_unique<HostServer>(cfg);host->start();disc=std::make_unique<Discovery>(cfg.port,cfg.hostid);disc->start();}
     ~App(){if(client)client->close();if(disc)disc->stop();if(host)host->stop();if(frame)DeleteObject(frame);DeleteObject(f9);DeleteObject(f10);DeleteObject(f12);DeleteObject(f15);}
     void setup_tray(){tray.cbSize=sizeof(tray);tray.hWnd=hw_host;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=icon;wcscpy_s(tray.szTip,L"Simple Remote Desk");Shell_NotifyIconW(NIM_ADD,&tray);}
     void show_view(){ShowWindow(hw_view,SW_SHOWMAXIMIZED);SetForegroundWindow(hw_view);}
@@ -674,18 +735,18 @@ static std::wstring gettxt(HWND h){int n=GetWindowTextLengthW(h);std::wstring s(
 static LRESULT CALLBACK hostproc(HWND h,UINT m,WPARAM w,LPARAM l){
     static HWND eport,epass,efps,equal,start,viewer;
     switch(m){
-    case WM_CREATE:{GAPP->hw_host=h;dark_title(h);GAPP->setup_tray();eport=CreateWindowExW(0,L"EDIT",std::to_wstring(GAPP->cfg.port).c_str(),WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,305,258,180,34,h,(HMENU)101,GH,nullptr);epass=CreateWindowExW(0,L"EDIT",u8w(GAPP->cfg.password).c_str(),WS_CHILD|WS_VISIBLE|WS_BORDER|ES_PASSWORD,665,258,245,34,h,(HMENU)102,GH,nullptr);efps=CreateWindowExW(0,L"EDIT",std::to_wstring(GAPP->cfg.fps).c_str(),WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,305,520,180,34,h,(HMENU)103,GH,nullptr);equal=CreateWindowExW(0,L"EDIT",std::to_wstring(GAPP->cfg.quality).c_str(),WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,305,578,180,34,h,(HMENU)104,GH,nullptr);start=CreateWindowExW(0,L"BUTTON",L"Перезапустить Host",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,680,735,190,42,h,(HMENU)105,GH,nullptr);viewer=CreateWindowExW(0,L"BUTTON",L"Открыть Viewer",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,875,735,160,42,h,(HMENU)106,GH,nullptr);for(HWND x:{eport,epass,efps,equal,start,viewer})SendMessageW(x,WM_SETFONT,(WPARAM)GAPP->f10,TRUE);return 0;}
+    case WM_CREATE:{GAPP->hw_host=h;dark_title(h);GAPP->setup_tray();eport=CreateWindowExW(0,L"EDIT",std::to_wstring(GAPP->cfg.port).c_str(),WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,305,258,180,34,h,(HMENU)101,GH,nullptr);epass=CreateWindowExW(0,L"EDIT",u8w(GAPP->cfg.password).c_str(),WS_CHILD|WS_VISIBLE|WS_BORDER|ES_PASSWORD,665,258,245,34,h,(HMENU)102,GH,nullptr);efps=CreateWindowExW(0,L"EDIT",std::to_wstring(GAPP->cfg.fps).c_str(),WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,305,520,180,34,h,(HMENU)103,GH,nullptr);equal=CreateWindowExW(0,L"EDIT",std::to_wstring(GAPP->cfg.quality).c_str(),WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,305,578,180,34,h,(HMENU)104,GH,nullptr);start=CreateWindowExW(0,L"BUTTON",L"Перезапустить Host",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,680,735,190,42,h,(HMENU)105,GH,nullptr);viewer=CreateWindowExW(0,L"BUTTON",L"Открыть Viewer",WS_CHILD|WS_VISIBLE|BS_PUSHBUTTON,875,735,160,42,h,(HMENU)106,GH,nullptr);for(HWND x:{eport,epass,efps,equal,start,viewer})SendMessageW(x,WM_SETFONT,(WPARAM)(HFONT)GetStockObject(DEFAULT_GUI_FONT),TRUE);return 0;}
     case WM_COMMAND:if(LOWORD(w)==106){GAPP->show_view();return 0;}if(LOWORD(w)==105){try{GAPP->cfg.port=std::stoi(gettxt(eport));GAPP->cfg.password=wu8(gettxt(epass));GAPP->cfg.fps=std::clamp(std::stoi(gettxt(efps)),1,60);GAPP->cfg.quality=std::clamp(std::stoi(gettxt(equal)),20,100);save_cfg(GAPP->cfg);GAPP->disc->stop();GAPP->host->stop();GAPP->host=std::make_unique<HostServer>(GAPP->cfg);if(!GAPP->host->start())MessageBoxW(h,L"Не удалось открыть сетевые порты.",L"Host",MB_ICONERROR);GAPP->disc=std::make_unique<Discovery>(GAPP->cfg.port,GAPP->cfg.hostid);GAPP->disc->start();InvalidateRect(h,nullptr,TRUE);}catch(...){MessageBoxW(h,L"Проверьте значения параметров.",L"Host",MB_ICONWARNING);}return 0;}break;
     case WM_TRAY:if(l==WM_LBUTTONDBLCLK||l==WM_LBUTTONUP){ShowWindow(h,SW_RESTORE);SetForegroundWindow(h);}else if(l==WM_RBUTTONUP){HMENU q=CreatePopupMenu();AppendMenuW(q,MF_STRING,1,L"Открыть Viewer");AppendMenuW(q,MF_STRING,2,L"Настройки Host");AppendMenuW(q,MF_SEPARATOR,0,nullptr);AppendMenuW(q,MF_STRING,3,L"Выход");POINT p;GetCursorPos(&p);SetForegroundWindow(h);int x=TrackPopupMenu(q,TPM_RETURNCMD|TPM_RIGHTBUTTON,p.x,p.y,0,h,nullptr);DestroyMenu(q);if(x==1)GAPP->show_view();if(x==2){ShowWindow(h,SW_RESTORE);SetForegroundWindow(h);}if(x==3)PostQuitMessage(0);}return 0;
     case WM_CLOSE:ShowWindow(h,SW_HIDE);return 0;
-    case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT cr;GetClientRect(h,&cr);fill(dc,cr,C_BG);RECT hd{0,0,cr.right,106};fill(dc,hd,C_HEADER);txt(dc,L"Simple Remote Host",{34,20,500,56},C_TEXT,GAPP->f15);txt(dc,L"Удалённый доступ к этому компьютеру",{34,57,600,86},C_MUTED,GAPP->f10);roundbox(dc,{24,126,cr.right-24,218},C_SURFACE,C_BORDER_SOFT);txt(dc,GAPP->host->running()?L"Host запущен":L"Host остановлен",{54,145,420,176},GAPP->host->running()?C_SUCCESS:C_OFFLINE,GAPP->f15);txt(dc,L"Ожидание подключений",{54,177,500,202},C_MUTED,GAPP->f9);roundbox(dc,{24,232,cr.right-24,450},C_SURFACE,C_BORDER_SOFT);txt(dc,L"Доступ и безопасность",{50,244,430,280},C_TEXT,GAPP->f12);txt(dc,L"Базовый порт",{50,302,270,336},C_MUTED,GAPP->f10);txt(dc,L"Пароль доступа",{540,302,760,336},C_MUTED,GAPP->f10);txt(dc,L"LAN и Radmin/VPN определяются в фоне; UI не перечисляет адаптеры по таймеру.",{50,372,990,410},C_MUTED2,GAPP->f9);roundbox(dc,{24,470,cr.right-24,690},C_SURFACE,C_BORDER_SOFT);txt(dc,L"Качество соединения",{50,482,430,518},C_TEXT,GAPP->f12);txt(dc,L"Кадры в секунду (FPS)",{50,522,270,556},C_MUTED,GAPP->f10);txt(dc,L"Качество JPEG (%)",{50,580,270,614},C_MUTED,GAPP->f10);txt(dc,L"Native C++20 • SRD3 • AES-GCM • Winsock",{540,545,990,580},C_MUTED,GAPP->f10);EndPaint(h,&ps);return 0;}
+    case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT cr;GetClientRect(h,&cr);fill(dc,cr,C_BG);RECT hd{0,0,cr.right,106};fill(dc,hd,C_HEADER);txt(dc,L"Simple Remote Host",{34,20,500,56},C_TEXT,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Удалённый доступ к этому компьютеру",{34,57,600,86},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));roundbox(dc,{24,126,cr.right-24,218},C_SURFACE,C_BORDER_SOFT);txt(dc,GAPP->host->running()?L"Host запущен":L"Host остановлен",{54,145,420,176},GAPP->host->running()?C_SUCCESS:C_OFFLINE,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Ожидание подключений",{54,177,500,202},C_MUTED,GAPP->f9);roundbox(dc,{24,232,cr.right-24,450},C_SURFACE,C_BORDER_SOFT);txt(dc,L"Доступ и безопасность",{50,244,430,280},C_TEXT,GAPP->f12);txt(dc,L"Базовый порт",{50,302,270,336},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Пароль доступа",{540,302,760,336},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"LAN и Radmin/VPN определяются в фоне; UI не перечисляет адаптеры по таймеру.",{50,372,990,410},C_MUTED2,GAPP->f9);roundbox(dc,{24,470,cr.right-24,690},C_SURFACE,C_BORDER_SOFT);txt(dc,L"Качество соединения",{50,482,430,518},C_TEXT,GAPP->f12);txt(dc,L"Кадры в секунду (FPS)",{50,522,270,556},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Качество JPEG (%)",{50,580,270,614},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Native C++20 • SRD3 • AES-GCM • Winsock",{540,545,990,580},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));EndPaint(h,&ps);return 0;}
     case WM_DESTROY:return 0;
     }return DefWindowProcW(h,m,w,l);
 }
 static LRESULT CALLBACK viewproc(HWND h,UINT m,WPARAM w,LPARAM l){
     static HWND eip,eport,epass,connectb;
     switch(m){
-    case WM_CREATE:{GAPP->hw_view=h;dark_title(h);eip=CreateWindowExW(0,L"EDIT",L"127.0.0.1",WS_CHILD|WS_VISIBLE|WS_BORDER,300,38,190,34,h,(HMENU)201,GH,nullptr);eport=CreateWindowExW(0,L"EDIT",L"45900",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,500,38,90,34,h,(HMENU)202,GH,nullptr);epass=CreateWindowExW(0,L"EDIT",L"123456",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_PASSWORD,600,38,170,34,h,(HMENU)203,GH,nullptr);connectb=CreateWindowExW(0,L"BUTTON",L"Подключиться",WS_CHILD|WS_VISIBLE,780,36,150,38,h,(HMENU)204,GH,nullptr);for(HWND x:{eip,eport,epass,connectb})SendMessageW(x,WM_SETFONT,(WPARAM)GAPP->f10,TRUE);SetTimer(h,1,1000,nullptr);return 0;}
+    case WM_CREATE:{GAPP->hw_view=h;dark_title(h);eip=CreateWindowExW(0,L"EDIT",L"127.0.0.1",WS_CHILD|WS_VISIBLE|WS_BORDER,300,38,190,34,h,(HMENU)201,GH,nullptr);eport=CreateWindowExW(0,L"EDIT",L"45900",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_NUMBER,500,38,90,34,h,(HMENU)202,GH,nullptr);epass=CreateWindowExW(0,L"EDIT",L"123456",WS_CHILD|WS_VISIBLE|WS_BORDER|ES_PASSWORD,600,38,170,34,h,(HMENU)203,GH,nullptr);connectb=CreateWindowExW(0,L"BUTTON",L"Подключиться",WS_CHILD|WS_VISIBLE,780,36,150,38,h,(HMENU)204,GH,nullptr);for(HWND x:{eip,eport,epass,connectb})SendMessageW(x,WM_SETFONT,(WPARAM)(HFONT)GetStockObject(DEFAULT_GUI_FONT),TRUE);SetTimer(h,1,1000,nullptr);return 0;}
     case WM_COMMAND:if(LOWORD(w)==204){try{GAPP->connect_to(wu8(gettxt(eip)),std::stoi(gettxt(eport)),wu8(gettxt(epass)));SetFocus(h);}catch(...){}}return 0;
     case WM_TIMER:InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_FRAME:InvalidateRect(h,nullptr,FALSE);return 0;
@@ -722,7 +783,7 @@ static LRESULT CALLBACK viewproc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_RBUTTONUP:if(GAPP->client&&GAPP->client->running()){GAPP->client->mb(1,false);return 0;}break;
     case WM_MOUSEWHEEL:if(GAPP->client&&GAPP->client->running()){GAPP->client->mw(GET_WHEEL_DELTA_WPARAM(w));return 0;}break;
     case WM_CLOSE:ShowWindow(h,SW_HIDE);return 0;
-    case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT cr;GetClientRect(h,&cr);fill(dc,cr,C_BG);fill(dc,{0,0,cr.right,94},C_HEADER);txt(dc,L"Simple Remote Viewer",{28,12,275,48},C_TEXT,GAPP->f15);txt(dc,L"Компьютеры",{28,50,180,82},C_ACCENT,GAPP->f10);bool conn=GAPP->client&&GAPP->client->running();if(conn){HBITMAP bm=nullptr;int rw=0,rh=0;{std::lock_guard lk(GAPP->fm);bm=GAPP->frame;rw=GAPP->fw;rh=GAPP->fh;}if(bm&&rw&&rh){HDC md=CreateCompatibleDC(dc);auto old=SelectObject(md,bm);BITMAP bi{};GetObject(bm,sizeof(bi),&bi);double sc=std::min((double)cr.right/rw,(double)(cr.bottom-94)/rh);int dw=(int)(rw*sc),dh=(int)(rh*sc),x=(cr.right-dw)/2,y=94+(cr.bottom-94-dh)/2;SetStretchBltMode(dc,HALFTONE);StretchBlt(dc,x,y,dw,dh,md,0,0,bi.bmWidth,bi.bmHeight,SRCCOPY);SelectObject(md,old);DeleteDC(md);}else txt(dc,L"Подключение…",{0,95,cr.right,cr.bottom},C_MUTED,GAPP->f15,DT_CENTER|DT_VCENTER|DT_SINGLELINE);}else{txt(dc,L"Мои компьютеры",{34,116,500,155},C_TEXT,GAPP->f15);txt(dc,L"Можно подключиться вручную или выбрать Host, найденный в локальной сети.",{34,154,900,185},C_MUTED,GAPP->f10);auto v=GAPP->disc->snapshot();int y=214;if(v.empty())txt(dc,L"Новые Host в локальной сети или Radmin VPN появятся здесь автоматически.",{48,y,900,y+45},C_MUTED2,GAPP->f10);for(auto&s:v){roundbox(dc,{36,y,650,y+104},C_SURFACE,C_BORDER_SOFT);txt(dc,u8w(s.name).c_str(),{58,y+10,380,y+38},C_TEXT,GAPP->f12);auto a=u8w(s.ip+":"+std::to_string(s.port));txt(dc,a.c_str(),{58,y+43,360,y+68},C_MUTED,GAPP->f9);txt(dc,L"Онлайн",{410,y+16,480,y+40},C_SUCCESS,GAPP->f9);y+=118;}}EndPaint(h,&ps);return 0;}
+    case WM_PAINT:{PAINTSTRUCT ps;HDC dc=BeginPaint(h,&ps);RECT cr;GetClientRect(h,&cr);fill(dc,cr,C_BG);fill(dc,{0,0,cr.right,94},C_HEADER);txt(dc,L"Simple Remote Viewer",{28,12,275,48},C_TEXT,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Компьютеры",{28,50,180,82},C_ACCENT,(HFONT)GetStockObject(DEFAULT_GUI_FONT));bool conn=GAPP->client&&GAPP->client->running();if(conn){HBITMAP bm=nullptr;int rw=0,rh=0;{std::lock_guard lk(GAPP->fm);bm=GAPP->frame;rw=GAPP->fw;rh=GAPP->fh;}if(bm&&rw&&rh){HDC md=CreateCompatibleDC(dc);auto old=SelectObject(md,bm);BITMAP bi{};GetObject(bm,sizeof(bi),&bi);double sc=std::min((double)cr.right/rw,(double)(cr.bottom-94)/rh);int dw=(int)(rw*sc),dh=(int)(rh*sc),x=(cr.right-dw)/2,y=94+(cr.bottom-94-dh)/2;SetStretchBltMode(dc,HALFTONE);StretchBlt(dc,x,y,dw,dh,md,0,0,bi.bmWidth,bi.bmHeight,SRCCOPY);SelectObject(md,old);DeleteDC(md);}else txt(dc,L"Подключение…",{0,95,cr.right,cr.bottom},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT),DT_CENTER|DT_VCENTER|DT_SINGLELINE);}else{txt(dc,L"Мои компьютеры",{34,116,500,155},C_TEXT,(HFONT)GetStockObject(DEFAULT_GUI_FONT));txt(dc,L"Можно подключиться вручную или выбрать Host, найденный в локальной сети.",{34,154,900,185},C_MUTED,(HFONT)GetStockObject(DEFAULT_GUI_FONT));auto v=GAPP->disc->snapshot();int y=214;if(v.empty())txt(dc,L"Новые Host в локальной сети или Radmin VPN появятся здесь автоматически.",{48,y,900,y+45},C_MUTED2,(HFONT)GetStockObject(DEFAULT_GUI_FONT));for(auto&s:v){roundbox(dc,{36,y,650,y+104},C_SURFACE,C_BORDER_SOFT);txt(dc,u8w(s.name).c_str(),{58,y+10,380,y+38},C_TEXT,GAPP->f12);auto a=u8w(s.ip+":"+std::to_string(s.port));txt(dc,a.c_str(),{58,y+43,360,y+68},C_MUTED,GAPP->f9);txt(dc,L"Онлайн",{410,y+16,480,y+40},C_SUCCESS,GAPP->f9);y+=118;}}EndPaint(h,&ps);return 0;}
     }return DefWindowProcW(h,m,w,l);
 }
 static void classes(){

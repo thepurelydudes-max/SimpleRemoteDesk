@@ -212,16 +212,53 @@ static void mouse_button(byte b,bool d){DWORD f=0;if(b==0)f=d?MOUSEEVENTF_LEFTDO
 static void mouse_wheel(int d){INPUT i{};i.type=INPUT_MOUSE;i.mi.dwFlags=MOUSEEVENTF_WHEEL;i.mi.mouseData=d;SendInput(1,&i,sizeof(i));}
 static void key_event(int vk,bool down){INPUT i{};i.type=INPUT_KEYBOARD;i.ki.wVk=(WORD)vk;i.ki.dwFlags=down?0:KEYEVENTF_KEYUP;SendInput(1,&i,sizeof(i));}
 
-struct Config{
-    int port=45900,fps=30,quality=95;bool audio=true,autostart=false;std::string password="123456";std::string hostid;
-};
+static std::string b64_encode(std::span<const byte> d){
+    if(d.empty())return{};DWORD n=0;CryptBinaryToStringA(d.data(),(DWORD)d.size(),CRYPT_STRING_BASE64|CRYPT_STRING_NOCRLF,nullptr,&n);
+    std::string o(n? n-1:0,'\0');if(n)CryptBinaryToStringA(d.data(),(DWORD)d.size(),CRYPT_STRING_BASE64|CRYPT_STRING_NOCRLF,o.data(),&n);return o;
+}
+static std::vector<byte> b64_decode(std::string_view s){
+    DWORD n=0;if(!CryptStringToBinaryA(s.data(),(DWORD)s.size(),CRYPT_STRING_BASE64,nullptr,&n,nullptr,nullptr))return{};
+    std::vector<byte>o(n);if(!CryptStringToBinaryA(s.data(),(DWORD)s.size(),CRYPT_STRING_BASE64,o.data(),&n,nullptr,nullptr))return{};o.resize(n);return o;
+}
+static std::string dpapi_protect(std::string_view plain){
+    if(plain.empty())return{};static const std::string ent="SimpleRemoteDesk-v2";
+    DATA_BLOB in{(DWORD)plain.size(),(BYTE*)plain.data()},entropy{(DWORD)ent.size(),(BYTE*)ent.data()},out{};
+    if(!CryptProtectData(&in,L"SimpleRemoteDesk", &entropy,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&out))return{};
+    std::string r=b64_encode(std::span<const byte>(out.pbData,out.cbData));SecureZeroMemory((void*)plain.data(),0);LocalFree(out.pbData);return r;
+}
+static std::string dpapi_unprotect(std::string_view encoded){
+    if(encoded.empty())return{};auto enc=b64_decode(encoded);if(enc.empty())return{};static const std::string ent="SimpleRemoteDesk-v2";
+    DATA_BLOB in{(DWORD)enc.size(),enc.data()},entropy{(DWORD)ent.size(),(BYTE*)ent.data()},out{};
+    if(!CryptUnprotectData(&in,nullptr,&entropy,nullptr,nullptr,CRYPTPROTECT_UI_FORBIDDEN,&out))return{};
+    std::string r((char*)out.pbData,out.cbData);SecureZeroMemory(out.pbData,out.cbData);LocalFree(out.pbData);return r;
+}
 static std::string rndhex(size_t n=16){std::vector<byte>b(n);BCryptGenRandom(nullptr,b.data(),(ULONG)b.size(),BCRYPT_USE_SYSTEM_PREFERRED_RNG);static char h[]="0123456789abcdef";std::string s;s.resize(n*2);for(size_t i=0;i<n;i++){s[2*i]=h[b[i]>>4];s[2*i+1]=h[b[i]&15];}return s;}
-static std::string extract(std::string_view j,std::string_view k,std::string def=""){auto p=j.find("\""+std::string(k)+"\"");if(p==std::string_view::npos)return def;p=j.find(':',p);if(p==std::string_view::npos)return def;p=j.find('"',p);if(p==std::string_view::npos)return def;auto e=j.find('"',p+1);if(e==std::string_view::npos)return def;return std::string(j.substr(p+1,e-p-1));}
+static std::string random_password(){
+    static constexpr char chars[]="ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz23456789";std::array<byte,12>b{};BCryptGenRandom(nullptr,b.data(),(ULONG)b.size(),BCRYPT_USE_SYSTEM_PREFERRED_RNG);
+    std::string s;s.reserve(b.size());for(byte x:b)s.push_back(chars[x%(sizeof(chars)-1)]);return s;
+}
+static std::string extract(std::string_view j,std::string_view k,std::string def=""){auto p=j.find("\""+std::string(k)+"\"");if(p==std::string_view::npos)return def;p=j.find(':',p);if(p==std::string_view::npos)return def;p=j.find('"',p);if(p==std::string_view::npos)return def;auto e=p+1;bool esc=false;for(;e<j.size();e++){if(!esc&&j[e]=='"')break;if(!esc&&j[e]=='\\')esc=true;else esc=false;}if(e>=j.size())return def;return json_unescape(j.substr(p+1,e-p-1));}
 static int extracti(std::string_view j,std::string_view k,int def){auto p=j.find("\""+std::string(k)+"\"");if(p==std::string_view::npos)return def;p=j.find(':',p);if(p==std::string_view::npos)return def;try{return std::stoi(std::string(j.substr(p+1)));}catch(...){return def;}}
 static bool extractb(std::string_view j,std::string_view k,bool def){auto p=j.find("\""+std::string(k)+"\"");if(p==std::string_view::npos)return def;p=j.find(':',p);if(p==std::string_view::npos)return def;auto t=j.substr(p+1,8);if(t.find("true")!=std::string_view::npos)return true;if(t.find("false")!=std::string_view::npos)return false;return def;}
-static Config load_cfg(){Config c;auto p=app_dir()/L"native-host.json";std::ifstream f(p,std::ios::binary);if(f){std::stringstream ss;ss<<f.rdbuf();auto j=ss.str();c.port=extracti(j,"port",45900);c.fps=extracti(j,"fps",30);c.quality=extracti(j,"quality",95);c.audio=extractb(j,"audio",true);c.autostart=extractb(j,"autostart",false);c.password=extract(j,"password","123456");c.hostid=extract(j,"hostid","");}if(c.hostid.empty())c.hostid=rndhex();return c;}
-static void save_cfg(const Config&c){std::ofstream f(app_dir()/L"native-host.json",std::ios::binary|std::ios::trunc);f<<"{\"port\":"<<c.port<<",\"fps\":"<<c.fps<<",\"quality\":"<<c.quality<<",\"audio\":"<<(c.audio?"true":"false")<<",\"autostart\":"<<(c.autostart?"true":"false")<<",\"password\":\""<<c.password<<"\",\"hostid\":\""<<c.hostid<<"\"}";}
 
+struct Config{
+    int port=45900,fps=30,quality=95;bool audio=true,autostart=false;std::string audio_device,password,hostid;
+};
+static void set_autostart(bool enabled){
+    HKEY k{};if(RegCreateKeyExW(HKEY_CURRENT_USER,L"Software\\Microsoft\\Windows\\CurrentVersion\\Run",0,nullptr,0,KEY_SET_VALUE,nullptr,&k,nullptr)!=ERROR_SUCCESS)return;
+    if(enabled){wchar_t exe[32768]{};GetModuleFileNameW(nullptr,exe,(DWORD)std::size(exe));std::wstring v=L"\""+std::wstring(exe)+L"\" --autostart";RegSetValueExW(k,L"SimpleRemoteDeskHost",0,REG_SZ,(BYTE*)v.c_str(),(DWORD)((v.size()+1)*sizeof(wchar_t)));}
+    else RegDeleteValueW(k,L"SimpleRemoteDeskHost");RegCloseKey(k);
+}
+static Config load_cfg(){
+    Config c;auto p=app_dir()/L"host.json";std::ifstream f(p,std::ios::binary);
+    if(f){std::stringstream ss;ss<<f.rdbuf();auto j=ss.str();c.port=extracti(j,"Port",45900);c.fps=extracti(j,"Fps",30);c.quality=extracti(j,"JpegQuality",95);c.audio=extractb(j,"AudioEnabled",true);c.autostart=extractb(j,"AutoStartWindows",false);c.audio_device=extract(j,"AudioDeviceId","");c.hostid=extract(j,"HostId","");c.password=dpapi_unprotect(extract(j,"ProtectedPassword",""));}
+    if(c.hostid.empty())c.hostid=rndhex();if(c.password.size()<6)c.password=random_password();c.port=std::clamp(c.port,1024,65531);c.fps=std::clamp(c.fps,1,60);c.quality=std::clamp(c.quality,20,100);return c;
+}
+static void save_cfg(const Config&c){
+    ensure_dir(app_dir());std::ofstream f(app_dir()/L"host.json",std::ios::binary|std::ios::trunc);auto prot=dpapi_protect(c.password);
+    f<<"{\n  \"Port\": "<<c.port<<",\n  \"ProtectedPassword\": \""<<json_escape(prot)<<"\",\n  \"Fps\": "<<c.fps<<",\n  \"JpegQuality\": "<<c.quality<<",\n  \"AudioEnabled\": "<<(c.audio?"true":"false")<<",\n  \"AudioDeviceId\": \""<<json_escape(c.audio_device)<<"\",\n  \"AutoStartWindows\": "<<(c.autostart?"true":"false")<<",\n  \"StartServerOnLaunch\": true,\n  \"HostId\": \""<<json_escape(c.hostid)<<"\",\n  \"SettingsVersion\": 4\n}\n";
+    set_autostart(c.autostart);
+}
 
 using Microsoft::WRL::ComPtr;
 

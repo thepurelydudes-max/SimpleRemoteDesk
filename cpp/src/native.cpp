@@ -225,6 +225,152 @@ static void save_cfg(const Config&c){std::ofstream f(app_dir()/L"native-host.jso
 
 using Microsoft::WRL::ComPtr;
 
+
+static std::string path_u8(const std::filesystem::path& p){
+    auto u=p.u8string();
+    return std::string(reinterpret_cast<const char*>(u.data()),u.size());
+}
+static std::filesystem::path path_from_u8(std::string_view s){
+    return std::filesystem::u8path(s.begin(),s.end());
+}
+static std::vector<std::filesystem::path> clipboard_files(){
+    std::vector<std::filesystem::path> out;
+    if(!OpenClipboard(nullptr)) return out;
+    HANDLE h=GetClipboardData(CF_HDROP);
+    if(h){
+        HDROP d=(HDROP)h; UINT n=DragQueryFileW(d,0xFFFFFFFF,nullptr,0);
+        for(UINT i=0;i<n&&out.size()<64;i++){
+            UINT z=DragQueryFileW(d,i,nullptr,0); std::wstring w(z,L'\0');
+            if(z){DragQueryFileW(d,i,w.data(),z+1);std::error_code ec;if(std::filesystem::exists(w,ec))out.emplace_back(w);}
+        }
+    }
+    CloseClipboard(); return out;
+}
+static bool set_clipboard_files(const std::vector<std::filesystem::path>& files){
+    if(files.empty()) return false;
+    size_t chars=1; std::vector<std::wstring> ws; ws.reserve(files.size());
+    for(auto&p:files){auto w=p.wstring();chars+=w.size()+1;ws.push_back(std::move(w));}
+    SIZE_T bytes=sizeof(DROPFILES)+chars*sizeof(wchar_t);
+    HGLOBAL hg=GlobalAlloc(GHND,bytes); if(!hg)return false;
+    auto* base=(byte*)GlobalLock(hg); if(!base){GlobalFree(hg);return false;}
+    auto* df=(DROPFILES*)base;df->pFiles=sizeof(DROPFILES);df->fWide=TRUE;
+    wchar_t* q=(wchar_t*)(base+sizeof(DROPFILES));
+    for(auto&w:ws){memcpy(q,w.c_str(),w.size()*sizeof(wchar_t));q+=w.size();*q++=L'\0';}
+    *q=L'\0';GlobalUnlock(hg);
+    for(int tries=0;tries<8;tries++){
+        if(OpenClipboard(nullptr)){
+            EmptyClipboard();
+            if(SetClipboardData(CF_HDROP,hg)){CloseClipboard();return true;}
+            CloseClipboard();break;
+        }
+        Sleep(20);
+    }
+    GlobalFree(hg);return false;
+}
+static void utf8_append_cp(std::string& o,unsigned cp){
+    if(cp<=0x7f)o.push_back((char)cp);
+    else if(cp<=0x7ff){o.push_back((char)(0xc0|(cp>>6)));o.push_back((char)(0x80|(cp&63)));}
+    else if(cp<=0xffff){o.push_back((char)(0xe0|(cp>>12)));o.push_back((char)(0x80|((cp>>6)&63)));o.push_back((char)(0x80|(cp&63)));}
+    else{o.push_back((char)(0xf0|(cp>>18)));o.push_back((char)(0x80|((cp>>12)&63)));o.push_back((char)(0x80|((cp>>6)&63)));o.push_back((char)(0x80|(cp&63)));}
+}
+static int hex4(std::string_view s,size_t p){
+    int v=0;for(int i=0;i<4;i++){char c=s[p+i];int x=c>='0'&&c<='9'?c-'0':c>='a'&&c<='f'?c-'a'+10:c>='A'&&c<='F'?c-'A'+10:-1;if(x<0)return-1;v=(v<<4)|x;}return v;
+}
+static std::string json_unescape(std::string_view s){
+    std::string o;o.reserve(s.size());
+    for(size_t i=0;i<s.size();i++){
+        char c=s[i];if(c!='\\'||i+1>=s.size()){o.push_back(c);continue;}
+        char e=s[++i];if(e=='"'||e=='\\'||e=='/')o.push_back(e);else if(e=='b')o.push_back('\b');else if(e=='f')o.push_back('\f');else if(e=='n')o.push_back('\n');else if(e=='r')o.push_back('\r');else if(e=='t')o.push_back('\t');
+        else if(e=='u'&&i+4<s.size()){int u=hex4(s,i+1);i+=4;if(u>=0xD800&&u<=0xDBFF&&i+6<s.size()&&s[i+1]=='\\'&&s[i+2]=='u'){int lo=hex4(s,i+3);if(lo>=0xDC00&&lo<=0xDFFF){i+=6;utf8_append_cp(o,0x10000+((u-0xD800)<<10)+(lo-0xDC00));continue;}}if(u>=0)utf8_append_cp(o,(unsigned)u);}
+    }return o;
+}
+static std::string json_escape(std::string_view s){
+    static char hx[]="0123456789abcdef";std::string o;o.reserve(s.size()+16);
+    for(unsigned char c:s){switch(c){case'"':o+="\\\"";break;case'\\':o+="\\\\";break;case'\b':o+="\\b";break;case'\f':o+="\\f";break;case'\n':o+="\\n";break;case'\r':o+="\\r";break;case'\t':o+="\\t";break;default:if(c<0x20){o+="\\u00";o.push_back(hx[c>>4]);o.push_back(hx[c&15]);}else o.push_back((char)c);}}return o;
+}
+struct FEntry{std::string rel;bool dir{};std::uint64_t len{};std::filesystem::path src;};
+struct FManifest{std::vector<FEntry> entries;std::vector<std::string> roots;};
+
+static std::string unique_root(std::string base,const std::vector<std::string>& used){
+    if(base.empty())base="item";std::string r=base;int n=2;
+    auto lower=[](std::string x){for(char&c:x)c=(char)tolower((unsigned char)c);return x;};
+    while(std::any_of(used.begin(),used.end(),[&](auto&u){return lower(u)==lower(r);}))r=base+" ("+std::to_string(n++)+")";
+    return r;
+}
+static FManifest build_manifest(const std::vector<std::filesystem::path>& roots){
+    FManifest m;std::error_code ec;
+    for(auto source:roots){
+        if(m.roots.size()>=64)break;
+        if(!std::filesystem::exists(source,ec))continue;
+        auto base=path_u8(source.filename());auto root=unique_root(base,m.roots);m.roots.push_back(root);
+        if(std::filesystem::is_regular_file(source,ec)){
+            m.entries.push_back({root,false,(std::uint64_t)std::filesystem::file_size(source,ec),source});
+        }else if(std::filesystem::is_directory(source,ec)){
+            m.entries.push_back({root,true,0,source});
+            std::filesystem::recursive_directory_iterator it(source,std::filesystem::directory_options::skip_permission_denied,ec),end;
+            for(;it!=end&&!ec;++it){
+                if(m.entries.size()>10000)throw std::runtime_error("too many files");
+                auto rel=std::filesystem::relative(it->path(),source,ec);if(ec){ec.clear();continue;}
+                std::string rp=root+"\\"+path_u8(rel);
+                if(it->is_directory(ec))m.entries.push_back({rp,true,0,it->path()});
+                else if(it->is_regular_file(ec))m.entries.push_back({rp,false,(std::uint64_t)it->file_size(ec),it->path()});
+                ec.clear();
+            }
+        }
+        if(m.entries.size()>10000)throw std::runtime_error("too many files");
+    }
+    return m;
+}
+static std::string manifest_json(const FManifest&m){
+    std::ostringstream o;o<<"{\"Entries\":[";
+    for(size_t i=0;i<m.entries.size();i++){auto&e=m.entries[i];if(i)o<<',';o<<"{\"RelativePath\":\""<<json_escape(e.rel)<<"\",\"IsDirectory\":"<<(e.dir?"true":"false")<<",\"Length\":"<<e.len<<"}";}
+    o<<"],\"Roots\":[";for(size_t i=0;i<m.roots.size();i++){if(i)o<<',';o<<"\""<<json_escape(m.roots[i])<<"\"";}o<<"]}";return o.str();
+}
+static std::optional<std::string> json_field_string(std::string_view obj,std::string_view key){
+    std::string needle="\""+std::string(key)+"\"";size_t p=obj.find(needle);if(p==std::string_view::npos)return{};p=obj.find(':',p+needle.size());if(p==std::string_view::npos)return{};p=obj.find('"',p+1);if(p==std::string_view::npos)return{};size_t b=++p;bool esc=false;for(;p<obj.size();p++){char c=obj[p];if(!esc&&c=='"')return json_unescape(obj.substr(b,p-b));if(!esc&&c=='\\')esc=true;else esc=false;}return{};
+}
+static bool json_field_bool(std::string_view obj,std::string_view key){
+    auto p=obj.find("\""+std::string(key)+"\"");if(p==std::string_view::npos)return false;p=obj.find(':',p);if(p==std::string_view::npos)return false;return obj.substr(p+1,8).find("true")!=std::string_view::npos;
+}
+static std::uint64_t json_field_u64(std::string_view obj,std::string_view key){
+    auto p=obj.find("\""+std::string(key)+"\"");if(p==std::string_view::npos)return 0;p=obj.find(':',p);if(p==std::string_view::npos)return 0;p++;while(p<obj.size()&&isspace((unsigned char)obj[p]))p++;std::uint64_t v=0;while(p<obj.size()&&isdigit((unsigned char)obj[p])){v=v*10+(obj[p++]-'0');}return v;
+}
+static FManifest parse_manifest(std::string_view j){
+    FManifest m;size_t ep=j.find("\"Entries\""),ea=ep==std::string_view::npos?ep:j.find('[',ep),ee=ea;
+    int depth=0;bool str=false,esc=false;if(ea!=std::string_view::npos)for(size_t i=ea+1;i<j.size();i++){char c=j[i];if(str){if(!esc&&c=='"')str=false;esc=!esc&&c=='\\';if(c!='\\')esc=false;continue;}if(c=='"'){str=true;continue;}if(c=='{'){if(depth++==0)ee=i;}else if(c=='}'&&--depth==0){auto obj=j.substr(ee,i-ee+1);auto rel=json_field_string(obj,"RelativePath");if(rel)m.entries.push_back({*rel,json_field_bool(obj,"IsDirectory"),json_field_u64(obj,"Length"),{}});}else if(c==']'&&depth==0)break;}
+    size_t rp=j.find("\"Roots\""),ra=rp==std::string_view::npos?rp:j.find('[',rp),re=ra==std::string_view::npos?ra:j.find(']',ra);if(ra!=std::string_view::npos&&re!=std::string_view::npos){size_t p=ra+1;while(p<re){p=j.find('"',p);if(p==std::string_view::npos||p>=re)break;size_t b=++p;bool e=false;for(;p<re;p++){if(!e&&j[p]=='"'){m.roots.push_back(json_unescape(j.substr(b,p-b)));p++;break;}if(!e&&j[p]=='\\')e=true;else e=false;}}}
+    if(m.entries.size()>10000)throw std::runtime_error("too many files");return m;
+}
+static std::filesystem::path safe_dest(const std::filesystem::path& root,std::string_view rel){
+    auto rp=path_from_u8(rel);if(rp.is_absolute())throw std::runtime_error("absolute transfer path");
+    for(auto&part:rp)if(part==L"..")throw std::runtime_error("path traversal");
+    return root/rp;
+}
+static std::filesystem::path temp_transfer(std::wstring_view leaf){
+    wchar_t b[MAX_PATH+2]{};DWORD n=GetTempPathW(MAX_PATH,b);std::filesystem::path p(n?std::wstring(b,n):L".");p/=L"SimpleRemoteDesk";p/=leaf;p/=u8w(rndhex());ensure_dir(p);return p;
+}
+static void send_manifest_files(Channel& ch,const FManifest&m){
+    auto j=manifest_json(m);if(!ch.send(pkt::FileManifest,std::span<const byte>((const byte*)j.data(),j.size())))throw std::runtime_error("manifest send");
+    std::vector<byte>buf(1024*1024+4);
+    for(int i=0;i<(int)m.entries.size();i++){auto&e=m.entries[i];if(e.dir)continue;std::ifstream f(e.src,std::ios::binary);if(!f)continue;for(;;){f.read((char*)buf.data()+4,1024*1024);auto n=f.gcount();if(n<=0)break;le32(buf.data(),i);if(!ch.send(pkt::FileChunk,std::span<const byte>(buf.data(),(size_t)n+4)))throw std::runtime_error("chunk send");}}
+    if(!ch.send(pkt::FileTransferEnd))throw std::runtime_error("end send");
+}
+static std::vector<std::filesystem::path> receive_manifest_files(Channel& ch,std::wstring_view folder){
+    auto mp=ch.recv();if(!mp||mp->type!=pkt::FileManifest)throw std::runtime_error("manifest expected");
+    FManifest m=parse_manifest(std::string_view((char*)mp->payload.data(),mp->payload.size()));auto root=temp_transfer(folder);
+    for(auto&e:m.entries)if(e.dir)ensure_dir(safe_dest(root,e.rel));
+    std::ofstream current;int ci=-1;
+    for(;;){auto p=ch.recv();if(!p)throw std::runtime_error("transfer disconnected");if(p->type==pkt::FileTransferEnd)break;if(p->type!=pkt::FileChunk||p->payload.size()<4)continue;int idx=rd32(p->payload.data());if(idx<0||idx>=(int)m.entries.size())throw std::runtime_error("bad file index");auto&e=m.entries[idx];if(e.dir)continue;if(ci!=idx){if(current.is_open())current.close();auto dest=safe_dest(root,e.rel);ensure_dir(dest.parent_path());current.open(dest,std::ios::binary|std::ios::trunc);if(!current)throw std::runtime_error("file create");ci=idx;}current.write((char*)p->payload.data()+4,(std::streamsize)p->payload.size()-4);}
+    if(current.is_open())current.close();std::vector<std::filesystem::path>top;for(auto&r:m.roots){auto p=safe_dest(root,r);std::error_code ec;if(std::filesystem::exists(p,ec))top.push_back(p);}return top;
+}
+static int remote_clipboard_get(std::string host,int port,std::string pass){
+    Sock s=connect_tcp(host,port+4,8000);if(!s)return 0;auto k=auth_client(s.s,pass);Channel ch(s.s,k,VIEWER_PREFIX,HOST_PREFIX);if(!ch.send(pkt::FileClipboardGet))return 0;auto top=receive_manifest_files(ch,L"Clipboard");if(!top.empty())set_clipboard_files(top);return(int)top.size();
+}
+static int remote_clipboard_put(std::string host,int port,std::string pass,const std::vector<std::filesystem::path>&roots){
+    auto m=build_manifest(roots);if(m.entries.empty())return 0;Sock s=connect_tcp(host,port+4,8000);if(!s)return 0;auto k=auth_client(s.s,pass);Channel ch(s.s,k,VIEWER_PREFIX,HOST_PREFIX);if(!ch.send(pkt::FileClipboardPut))return 0;send_manifest_files(ch,m);auto ack=ch.recv();if(!ack||ack->type!=pkt::FileTransferAck)throw std::runtime_error("no transfer ack");return(int)m.roots.size();
+}
+
+
 struct AudioFmt { int rate=48000,bits=16,channels=2,encoding=1; };
 
 static bool wave_is_float(WAVEFORMATEX* f){
@@ -362,6 +508,18 @@ class HostServer{
     void data(Sock c){try{auto k=auth_server(c.s,cfg_.password);{std::lock_guard lk(sm_);if(session_)return;session_=true;sip_=peer_ip(c.s);ds_=c.s;}Channel ch(c.s,k,HOST_PREFIX,VIEWER_PREFIX);Capture cap(cfg_.quality);std::array<byte,8>d{};le32(d.data(),cap.w());le32(d.data()+4,cap.h());byte old=255;std::vector<byte>j;auto interval=std::chrono::microseconds(1000000/std::clamp(cfg_.fps,1,60));auto next=Clock::now();while(run_&&session_){if(!cap.jpeg(j))break;auto cur=cursor_kind();if(cur!=old){if(!ch.send(pkt::Cursor,std::span<const byte>(&cur,1)))break;old=cur;}if(!ch.send2(pkt::Screen,d,j))break;next+=interval;auto now=Clock::now();if(next>now)std::this_thread::sleep_until(next);else next=now;}}catch(...){log_line(L"data channel closed");}end();}
     void control(Sock c){auto ip=peer_ip(c.s);if(!wait_ip(ip))return;try{auto k=auth_server(c.s,cfg_.password);{std::lock_guard lk(sm_);cs_=c.s;}Channel ch(c.s,k,HOST_PREFIX,VIEWER_PREFIX);while(run_&&session_){auto p=ch.recv();if(!p)break;auto&b=p->payload;if(p->type==pkt::MouseMove&&b.size()>=8)mouse_move(rd32(b.data()),rd32(b.data()+4));else if(p->type==pkt::MouseButton&&b.size()>=2)mouse_button(b[0],b[1]!=0);else if(p->type==pkt::MouseWheel&&b.size()>=4)mouse_wheel(rd32(b.data()));else if(p->type==pkt::Key&&b.size()>=5)key_event(rd32(b.data()),b[4]!=0);else if(p->type==pkt::KeyCombination&&b.size()>=4){int n=rd32(b.data());if(n>0&&n<=16&&b.size()>=(size_t)(4+n*4)){std::vector<int>keys(n);for(int i=0;i<n;i++)keys[i]=rd32(b.data()+4+i*4);for(int v:keys)key_event(v,true);for(auto it=keys.rbegin();it!=keys.rend();++it)key_event(*it,false);}}}}catch(...){log_line(L"control channel closed");}end();}
     void preview(Sock c){try{auto k=auth_server(c.s,cfg_.password);Channel ch(c.s,k,HOST_PREFIX,VIEWER_PREFIX);Capture cap(70);std::vector<byte>j;if(cap.jpeg(j)){std::array<byte,8>d{};le32(d.data(),cap.w());le32(d.data()+4,cap.h());ch.send2(pkt::Preview,d,j);}}catch(...){}}
+    void file(Sock c){
+        try{
+            auto k=auth_server(c.s,cfg_.password);Channel ch(c.s,k,HOST_PREFIX,VIEWER_PREFIX);auto cmd=ch.recv();if(!cmd)return;
+            if(cmd->type==pkt::FileClipboardGet){
+                auto m=build_manifest(clipboard_files());send_manifest_files(ch,m);
+            }else if(cmd->type==pkt::FileClipboardPut){
+                auto top=receive_manifest_files(ch,L"Incoming");set_clipboard_files(top);Sleep(180);
+                key_event(VK_CONTROL,true);key_event('V',true);key_event('V',false);key_event(VK_CONTROL,false);
+                static const byte ok[2]={'O','K'};ch.send(pkt::FileTransferAck,ok);
+            }
+        }catch(...){log_line(L"file transfer closed");}
+    }
     void audio(Sock c){
         auto ip=peer_ip(c.s);if(!wait_ip(ip))return;
         try{
@@ -382,7 +540,7 @@ class HostServer{
             cap.stop();
         }catch(...){log_line(L"audio channel closed");}
     }
-    void acceptor(int i){while(run_){sockaddr_storage a{};int z=sizeof(a);SOCKET x=accept(ls_[i].s,(sockaddr*)&a,&z);if(x==INVALID_SOCKET){if(run_)Sleep(50);continue;}tcp_opts(x);Sock c(x);if(i==0)std::thread([this,c=std::move(c)]()mutable{data(std::move(c));}).detach();else if(i==1)std::thread([this,c=std::move(c)]()mutable{control(std::move(c));}).detach();else if(i==2)std::thread([this,c=std::move(c)]()mutable{preview(std::move(c));}).detach();else if(i==3)std::thread([this,c=std::move(c)]()mutable{audio(std::move(c));}).detach();else std::thread([this,c=std::move(c)]()mutable{try{(void)auth_server(c.s,cfg_.password);}catch(...){}}).detach();}}
+    void acceptor(int i){while(run_){sockaddr_storage a{};int z=sizeof(a);SOCKET x=accept(ls_[i].s,(sockaddr*)&a,&z);if(x==INVALID_SOCKET){if(run_)Sleep(50);continue;}tcp_opts(x);Sock c(x);if(i==0)std::thread([this,c=std::move(c)]()mutable{data(std::move(c));}).detach();else if(i==1)std::thread([this,c=std::move(c)]()mutable{control(std::move(c));}).detach();else if(i==2)std::thread([this,c=std::move(c)]()mutable{preview(std::move(c));}).detach();else if(i==3)std::thread([this,c=std::move(c)]()mutable{audio(std::move(c));}).detach();else std::thread([this,c=std::move(c)]()mutable{file(std::move(c));}).detach();}}
 public:
     explicit HostServer(Config c):cfg_(std::move(c)){}
     ~HostServer(){stop();}
@@ -408,6 +566,7 @@ public:
     void mb(byte b,bool d){std::lock_guard lk(qm_);q_.push_back({pkt::MouseButton,{b,(byte)(d?1:0)}});qcv_.notify_one();}
     void mw(int d){std::vector<byte>p(4);le32(p.data(),d);std::lock_guard lk(qm_);q_.push_back({pkt::MouseWheel,std::move(p)});qcv_.notify_one();}
     void key(int v,bool d){std::vector<byte>p(5);le32(p.data(),v);p[4]=d;std::lock_guard lk(qm_);q_.push_back({pkt::Key,std::move(p)});qcv_.notify_one();}
+    void combo(std::initializer_list<int> keys){std::vector<byte>p(4+keys.size()*4);le32(p.data(),(int)keys.size());int i=0;for(int v:keys)le32(p.data()+4+(i++)*4,v);std::lock_guard lk(qm_);q_.push_back({pkt::KeyCombination,std::move(p)});qcv_.notify_one();}
 };
 
 static HFONT mkfont(int pt,bool bold=false){LOGFONTW lf{};lf.lfHeight=-MulDiv(pt,GetDeviceCaps(GetDC(nullptr),LOGPIXELSY),72);wcscpy_s(lf.lfFaceName,bold?L"Segoe UI Semibold":L"Segoe UI");lf.lfWeight=bold?FW_SEMIBOLD:FW_NORMAL;return CreateFontIndirectW(&lf);}
@@ -422,11 +581,22 @@ static App* GAPP=nullptr;
 
 class App{
 public:
-    Config cfg=load_cfg();std::unique_ptr<HostServer>host;std::unique_ptr<Discovery>disc;std::unique_ptr<Client>client;HWND hw_host{},hw_view{};NOTIFYICONDATAW tray{};HICON icon{};HFONT f9{},f10{},f12{},f15{};std::mutex fm;HBITMAP frame{};int fw{},fh{};std::string target_ip;int target_port=45900;std::string target_pass="123456";
+    Config cfg=load_cfg();std::atomic<bool> file_busy{false};std::unique_ptr<HostServer>host;std::unique_ptr<Discovery>disc;std::unique_ptr<Client>client;HWND hw_host{},hw_view{};NOTIFYICONDATAW tray{};HICON icon{};HFONT f9{},f10{},f12{},f15{};std::mutex fm;HBITMAP frame{};int fw{},fh{};std::string target_ip;int target_port=45900;std::string target_pass="123456";
     App(){f9=mkfont(9);f10=mkfont(10);f12=mkfont(12,true);f15=mkfont(15,true);icon=(HICON)LoadImageW(GH,MAKEINTRESOURCEW(1),IMAGE_ICON,32,32,LR_DEFAULTCOLOR);host=std::make_unique<HostServer>(cfg);host->start();disc=std::make_unique<Discovery>(cfg.port,cfg.hostid);disc->start();}
     ~App(){if(client)client->close();if(disc)disc->stop();if(host)host->stop();if(frame)DeleteObject(frame);DeleteObject(f9);DeleteObject(f10);DeleteObject(f12);DeleteObject(f15);}
     void setup_tray(){tray.cbSize=sizeof(tray);tray.hWnd=hw_host;tray.uID=1;tray.uFlags=NIF_MESSAGE|NIF_ICON|NIF_TIP;tray.uCallbackMessage=WM_TRAY;tray.hIcon=icon;wcscpy_s(tray.szTip,L"Simple Remote Desk");Shell_NotifyIconW(NIM_ADD,&tray);}
     void show_view(){ShowWindow(hw_view,SW_SHOWMAXIMIZED);SetForegroundWindow(hw_view);}
+    void copy_remote_files(){
+      if(file_busy.exchange(true)||!client||!client->running())return;
+      client->combo({VK_CONTROL,'C'});
+      std::string ip=target_ip,pass=target_pass;int port=target_port;
+      std::thread([this,ip=std::move(ip),pass=std::move(pass),port]{Sleep(650);try{remote_clipboard_get(ip,port,pass);}catch(...){log_line(L"remote clipboard download failed");}file_busy=false;}).detach();
+    }
+    bool paste_local_files(){
+      auto files=clipboard_files();if(files.empty())return false;if(file_busy.exchange(true))return true;
+      std::string ip=target_ip,pass=target_pass;int port=target_port;
+      std::thread([this,ip=std::move(ip),pass=std::move(pass),port,files=std::move(files)]{try{remote_clipboard_put(ip,port,pass,files);}catch(...){log_line(L"remote clipboard upload failed");}file_busy=false;}).detach();return true;
+    }
     void connect_to(std::string ip,int port,std::string pass){
       if(client)client->close();target_ip=ip;target_port=port;target_pass=pass;client=std::make_unique<Client>();
       client->on_frame=[this](std::vector<byte>j,int w,int h){IStream*st=SHCreateMemStream(j.data(),(UINT)j.size());if(!st)return;Gdiplus::Bitmap im(st);HBITMAP hb=nullptr;if(im.GetLastStatus()==Gdiplus::Ok)im.GetHBITMAP(Gdiplus::Color(0,0,0),&hb);st->Release();if(hb){{std::lock_guard lk(fm);if(frame)DeleteObject(frame);frame=hb;fw=w;fh=h;}PostMessageW(hw_view,WM_FRAME,0,0);}};
@@ -453,8 +623,17 @@ static LRESULT CALLBACK viewproc(HWND h,UINT m,WPARAM w,LPARAM l){
     case WM_COMMAND:if(LOWORD(w)==204){try{GAPP->connect_to(wu8(gettxt(eip)),std::stoi(gettxt(eport)),wu8(gettxt(epass)));SetFocus(h);}catch(...){}}return 0;
     case WM_TIMER:InvalidateRect(h,nullptr,FALSE);return 0;
     case WM_FRAME:InvalidateRect(h,nullptr,FALSE);return 0;
-    case WM_KEYDOWN:if(GAPP->client&&GAPP->client->running()){if(w==VK_F11){LONG s=GetWindowLongW(h,GWL_STYLE);SetWindowLongW(h,GWL_STYLE,s^WS_OVERLAPPEDWINDOW);ShowWindow(h,SW_MAXIMIZE);return 0;}GAPP->client->key((int)w,true);return 0;}break;
-    case WM_KEYUP:if(GAPP->client&&GAPP->client->running()){GAPP->client->key((int)w,false);return 0;}break;
+    case WM_KEYDOWN:
+        if(GAPP->client&&GAPP->client->running()){
+            if(w==VK_F11){LONG s=GetWindowLongW(h,GWL_STYLE);SetWindowLongW(h,GWL_STYLE,s^WS_OVERLAPPEDWINDOW);ShowWindow(h,SW_MAXIMIZE);return 0;}
+            bool ctrl=(GetKeyState(VK_CONTROL)&0x8000)!=0,shift=(GetKeyState(VK_SHIFT)&0x8000)!=0;
+            if(ctrl&&w=='C'){GAPP->copy_remote_files();return 0;}
+            if(ctrl&&w=='V'){if(!GAPP->paste_local_files())GAPP->client->combo({VK_CONTROL,'V'});return 0;}
+            if(ctrl&&shift&&w==VK_ESCAPE){GAPP->client->combo({VK_CONTROL,VK_SHIFT,VK_ESCAPE});return 0;}
+            GAPP->client->key((int)w,true);return 0;
+        }break;
+    case WM_KEYUP:if(GAPP->client&&GAPP->client->running()){if(w=='C'||w=='V')return 0;GAPP->client->key((int)w,false);return 0;}break;
+    case WM_SYSKEYDOWN:if(GAPP->client&&GAPP->client->running()&&w==VK_TAB&&(GetKeyState(VK_MENU)&0x8000)){GAPP->client->combo({VK_MENU,VK_TAB});return 0;}break;
     case WM_MOUSEMOVE:
         if(GAPP->client&&GAPP->client->running()){
             RECT c{}; GetClientRect(h,&c);

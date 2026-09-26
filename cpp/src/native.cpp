@@ -881,7 +881,7 @@ static LRESULT CALLBACK viewproc(HWND h,UINT m,WPARAM w,LPARAM l){
             HBRUSH db=CreateSolidBrush(online?C_SUCCESS:C_OFFLINE);SelectObject(dc,db);Ellipse(dc,x+cw-103,y+179,x+cw-93,y+189);DeleteObject(db);txt(dc,online?L"Онлайн":L"Офлайн",{x+cw-88,y+168,x+cw-18,y+202},online?C_SUCCESS:C_MUTED2,GAPP->f9);
             auto adr=u8w(profs[i].host+":"+std::to_string(profs[i].port));txt(dc,adr.c_str(),{x+58,y+201,x+cw-20,y+228},C_MUTED,GAPP->f9);
             int by=y+242,bw=(cw-48)/3;RECT rc{x+16,by,x+16+bw,by+42},re{x+24+bw,by,x+24+2*bw,by+42},rd{x+32+2*bw,by,x+cw-16,by+42};
-            paint_soft_button(dc,rc,L"▣  Подключиться",online,true?true:false); // primary even offline mirrors reference behavior availability
+            paint_soft_button(dc,rc,L"▣  Подключиться",online,false); // primary even offline mirrors reference behavior availability
             paint_soft_button(dc,re,L"✎  Изменить");paint_soft_button(dc,rd,L"▱  Удалить");
             GAPP->hits.push_back({rc,HitAction::Connect,i});GAPP->hits.push_back({re,HitAction::Edit,i});GAPP->hits.push_back({rd,HitAction::Delete,i});
         }
@@ -897,6 +897,7 @@ static LRESULT CALLBACK viewproc(HWND h,UINT m,WPARAM w,LPARAM l){
     return DefWindowProcW(h,m,w,l);
 }
 static void classes(){
+    WNDCLASSEXW p{sizeof(p)};p.hInstance=GH;p.hIcon=LoadIconW(GH,MAKEINTRESOURCEW(1));p.hCursor=LoadCursor(nullptr,IDC_ARROW);p.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);p.lpszClassName=L"SRD.Native.Profile";p.lpfnWndProc=profileproc;RegisterClassExW(&p);
     WNDCLASSEXW a{sizeof(a)};a.hInstance=GH;a.hIcon=LoadIconW(GH,MAKEINTRESOURCEW(1));a.hCursor=LoadCursor(nullptr,IDC_ARROW);a.hbrBackground=(HBRUSH)(COLOR_WINDOW+1);a.lpszClassName=L"SRD.Native.Host";a.lpfnWndProc=hostproc;RegisterClassExW(&a);
     WNDCLASSEXW b=a;b.lpszClassName=L"SRD.Native.Viewer";b.lpfnWndProc=viewproc;RegisterClassExW(&b);
 }
